@@ -1,6 +1,6 @@
 # VP Lab · 个人经验库与 AI 复盘设计稿
 
-状态：待用户确认，尚未开发接入。版本：设计 v0.1。日期：2026-11-04。
+状态：两种复盘范围已确认，交互与接口细节待评审，尚未开发接入。版本：设计 v0.2。日期：2026-11-04。
 
 配套原型：[experience-library.html](experience-library.html)。直接用浏览器打开。原型使用虚构示例，只在当前页面内存中演示交互，刷新恢复；不读取账号、不修改现有数据库、不调用模型。
 
@@ -10,15 +10,28 @@
 
 一次完整使用过程：
 
-1. 在提交历史中选中同题两次提交，例如 WA → AC。
-2. 打开代码差异，选择“分析这次修改”。
-3. 核对发送范围：两份代码、题面或题面缺失状态、判题记录，以及自己选择的相关经验。
+1. 选择“两次提交复盘”或“首次 AC 全过程复盘”，两者均是第一版核心范围。
+2. 单次修改选择同题两个版本；全过程从题目进入，读取该用户该题的首次提交到首次 AC 的所有提交。
+3. 核对发送范围：所选范围内的完整源码、题面或题面缺失状态、判题记录，以及自己选择的相关经验。
 4. AI 展示修改事实、可能原因、验证方法，引用对应版本和行号。
 5. 从分析中提取 0～3 张候选经验卡，用户选择后加入“待确认”。
 6. 用户编辑表达、补充理解，再点击“确认入库”。
 7. 后续分析只检索当前用户已确认的经验；是否有关联、是否合并，由用户决定。
 
 “已确认”表示用户认可这份记录，不表示所有原因都经过实验验证，也不表示已经掌握。
+
+### 两类经验的区别
+
+| 类型 | 输入 | 输出重点 | 来源保留 |
+| --- | --- | --- | --- |
+| 两次提交复盘 | 同题任意两个不同版本，不必相邻 | 一次改动解决或可能解决什么 | 两个版本、差异、行号；非相邻时标注跳过中间版本 |
+| 首次 AC 全过程复盘 | 最早提交 → 首次 AC，包含中间所有可获得提交 | 逐步改动、反复尝试、关键变化、跨步骤经验 | 完整提交序列 + 每条结论对应的一个或多个修改步骤 |
+
+这是分析范围，不是经验内容类别。“错误复盘、解题思路、实现技巧”等仍是独立分类。一次全过程可以提炼多条经验，不强制一题只保存一张卡，也不把所有相邻差异的说明直接拼接成过程结论。
+
+“首次提交”可能是 WA、CE、RE 或其他状态，不能过滤成只有 WA 的列表；第一份就是 AC 时展示“一次提交即 AC，无失败修改链”，不编造试错经验。全过程最晚在第一次 AC 截止，不混入后续优化、重交或再次练习。
+
+第一版以平台题目 ID 为边界、以当前用户绑定 handle 的已获取提交为范围，不混入其他选手。同题跨比赛模式的提交保留 participantType；首 AC 之后的 VP 不能被当作该题首次 AC 过程。
 
 ## 2. 页面与入口
 
@@ -28,6 +41,7 @@
 
 - 顶部：标题、搜索框、“写一条经验”。
 - 筛选：全部 / 已确认 / 待确认 / 收藏；类型和标签作为辅助筛选。
+- 来源范围：两次提交复盘 / 首次 AC 全过程 / 手动记录，可与确认状态组合筛选。
 - 主列表：标题、一句话经验、标签、来源数量、确认状态。
 - 详情区：适用场景 → 经验规则 → 自检步骤 → 当时发生了什么 → 来源证据 → 个人补充。
 - 学习标记：“还需练习 / 已再次用上”，只由用户手动选择。
@@ -43,19 +57,37 @@
 
 不提供“一键全部确认”。批量处理属于后续优化，避免用户把未检查的生成内容当成自己的结论。
 
-### AI 分析页（从现有代码对比进入）
+### AI 分析页（两个并列入口）
 
-选中两次提交 → 分析范围 → 修改说明与证据 → 候选经验。
+顶部保留两个并列选择卡：“分析这次修改”“复盘首次 AC 过程”。保留已有浅色卡片、绿色选中态的界面风格。
+
+单次修改：选中两次提交 → 核对范围 → 修改说明与证据 → 候选经验。
+
+全过程：选择一道题 → 核对首次 AC 截止点与完整性 → 提交时间线 → 逐次修改说明 → 跨步骤总结 → 候选经验。
+
+全过程页的上部时间线显示全部提交编号、判题状态、首次 AC 终点；下部可切换相邻两个版本的证据。右侧经验卡保存完整序列，具体经验还标注引用了哪些步骤。若只显示代码片段，应明确它是展示片段，正式分析输入仍是快照中的完整源码。
 
 - 已有源码和差异继续复用现有接口；无需上传全部历史。
 - 源码缺失时禁用分析按钮并指向同步入口。
 - 有题面时显示来源及版本；没有题面时仍可进行“仅代码分析”，明确无法判断是否满足题意。
-- 尚未 AC 时，默认“提示模式”；用户可明确选择“完整复盘”。不要仅凭一次 AC 宣称已证明根因。
+- 尚未 AC 时，默认“提示模式”；用户可明确选择“完整解释”（这是解答详细度，不是历史完整性）。全过程入口降级为“阶段复盘 · 尚未 AC”，不能出现首次 AC 结论。
 - 同时展示旧经验关联建议，但允许用户选择“与本题无关”。
+
+### 全过程完整性与边界
+
+- 按平台创建时间升序排列，时间相同时按平台确定性顺序（CF 使用数值提交编号）排列并固定到快照。
+- 只有历史分页已遍历完成、范围内每次提交源码可用、判题终态可用时，才显示“完整过程（按平台可获取历史）”。不宣称包含已被原站删除或永远不可见的记录。
+- 只有最近 1000 条、只导入 AC 或历史覆盖未知时，即使发现 AC，也只能标记“当前记录中最早的 AC；是否首次未知”。
+- 中间源码缺失：时间线保留缺失节点，明确列出编号；跨越该节点的差异不能称为相邻修改。用户可补齐或选择“片段复盘”，完整性标记必须随经验卡保存。
+- 所有已见记录都未 AC：展示“阶段复盘”，终点是当前最后一次提交，不预测何时一定 AC。
+- 已有 AC 但首次提交也是 AC：说明没有试错链，可以总结代码思路，不能生成“修复了什么”事实。
+- 结果还在评测、重判或同步期间新增记录：生成前固定快照，给出数据时间；数据范围变化时让用户刷新预览，而非悄悄换终点。
+- 提交结果变化仅是观察线索。“WA → WA”不等于改动无效，“WA → TLE”不等于正确性已证明，“TLE → AC”也不能独自证明全部根因。
 
 ### 其他入口
 
 - 题目详情：“记录本题经验”，预填平台、题号、标签，正文由用户填写。
+- 题目详情另有“复盘首次 AC 过程”，不要求用户手工逐条勾选提交。
 - 两次代码对比：“记录这次修改”，预填两个提交引用，不伪造错误原因。
 - 补题完成：“顺手记一条经验”，可选，不能成为强制步骤。
 - 手动记录：没有题目也能保存通用技巧。
@@ -76,6 +108,8 @@
 | practiceState | 还需练习 / 已再次用上 | 自评，不统计浏览次数推断 |
 | favorite | 方便再次找到 | 布尔值 |
 | origin | 手动 / 来自 AI 分析 | 保存后不可伪装为另一种来源 |
+| analysisScope | pair / first_ac / manual | 分别为两次提交、以首次 AC 为目标的过程、手动记录 |
+| coverageState | complete / partial / no_ac / unknown | 全过程卡保留完整性；first_ac 仅表示请求目标，不能掩盖未达到首次 AC 的事实 |
 | sources | 零到多个题目及提交来源 | 平台 + 题目 ID + 提交 ID，保留证据版本 |
 | version | 防止多标签页覆盖编辑 | 每次修改递增 |
 | createdAt / updatedAt / confirmedAt | 记录时间 | 存 UTC，界面用用户本地时间 |
@@ -112,7 +146,7 @@
 
 ### experiences
 
-`id, user_id, title, category, scenario, rule, checklist_json, incident, personal_note, tags_json, review_state, practice_state, favorite, origin, analysis_id?, candidate_key?, version, created_at, updated_at, confirmed_at?, deleted_at?`
+`id, user_id, title, category, scenario, rule, checklist_json, incident, personal_note, tags_json, review_state, practice_state, favorite, origin, analysis_scope, coverage_state?, analysis_id?, candidate_key?, version, created_at, updated_at, confirmed_at?, deleted_at?`
 
 - 唯一约束 `(user_id, analysis_id, candidate_key)` 用于同一 AI 候选的重复点击去重；手写记录不做标题唯一限制。
 - 索引 `(user_id, deleted_at, review_state, updated_at)`。
@@ -120,27 +154,28 @@
 
 ### experience_sources
 
-`id, experience_id, platform, problem_external_id, problem_title_snapshot, before_submission_id?, after_submission_id?, evidence_snapshot_id?, note, created_at`
+`id, experience_id, platform, problem_external_id, problem_title_snapshot, before_submission_id?, after_submission_id?, submission_sequence_json?, evidence_steps_json?, evidence_snapshot_id?, note, created_at`
 
 - 使用平台原生编号字符串，不从“1900A”这类组合字符串反推任意平台编号。
 - 提交 ID 始终与 platform 一起解释；两次提交须属于同一道题且在当前用户的数据权限内。
 - 链接由平台适配器生成；不直接展示模型生成的任意 URL。
 - 手写来源可标为“用户记录，未核对”，不能伪装为已读取到的提交。
+- 全过程用 submission_sequence_json 保存顺序和终点，不压缩成首尾两条；evidence_steps_json 将每项结论关联到具体 before/after 及行号。
 
 ### analysis_runs
 
-`id, user_id, status, provider, model_requested, model_returned?, prompt_version, schema_version, input_fingerprint, snapshot_id, result_json?, usage_json?, error_code?, created_at, completed_at?`
+`id, user_id, status, analysis_scope, coverage_state, provider, model_requested, model_returned?, prompt_version, schema_version, input_fingerprint, snapshot_id, result_json?, usage_json?, error_code?, created_at, completed_at?`
 
 任务状态：queued → running → succeeded / failed / cancelled / interrupted。重启时把未完成任务标为 interrupted，不伪装成完成。取消表示停止后续处理，已经发给供应商的请求可能仍产生费用。
 
 ### evidence_snapshots
 
-`id, user_id, platform, problem_id, problem_text?, problem_text_origin, code_versions_json, content_hash, created_at`
+`id, user_id, platform, problem_id, problem_text?, problem_text_origin, code_versions_json, ordered_submission_ids_json, first_ac_id?, history_coverage_json, missing_sources_json, content_hash, created_at`
 
 - 只保存这次选中输入及来源元信息，包含带行号的源码版本和 hash。
 - API Key、Secret、Authorization 不进入快照、日志、模型输入或导出。
 - 保存快照是为了来源记录后续更新时仍可核对原分析，不要每次打开都重新抓取或调用模型。
-- 第一版建议单次输入总计不超过 100000 字符；超过时要求用户缩小选择，不能静默截断。
+- 第一版建议单次输入总计不超过 100000 字符；全过程超过时明确报告超限，不可只取首尾代码或最近几次却仍称完整复盘。可以切换为局部两次提交分析；分段分析后统一汇总属于后续成本优化，未完成所有步骤前不显示完整结果。
 - 经验修改可用 `experience_revisions` 保存旧版内容和操作时间；正式开发时与 version 一起实现。
 
 数据库升级只新增表。现有账号和源码保留；不把示例经验自动写入真实用户。
@@ -151,7 +186,7 @@
 
 | 方法及路径 | 用途 |
 | --- | --- |
-| GET `/api/experiences?q=&reviewState=&favorite=&category=&tag=&page=` | 每页 20 条，返回条目、总数及筛选后的数量 |
+| GET `/api/experiences?q=&reviewState=&analysisScope=&favorite=&category=&tag=&page=` | 每页 20 条，返回条目、总数及筛选后的数量 |
 | GET `/api/experience?id=` | 正文、来源、证据校验状态、版本号 |
 | POST `/api/experiences/create` | 创建手动草稿或用户确认的手动卡 |
 | POST `/api/experiences/update` | 带 id、expectedVersion；编辑、收藏、自评标记 |
@@ -159,7 +194,8 @@
 | POST `/api/experiences/delete` | 软删除，expectedVersion 防止误删别人的新修改 |
 | POST `/api/experiences/restore` | 恢复回收站条目 |
 | GET `/api/experiences/related?analysisId=` | 当前用户已确认经验的相关建议与匹配依据 |
-| POST `/api/analyses/create` | 创建同题两次提交分析，202 返回 analysisId |
+| POST `/api/analyses/preview` | 预览两次提交或首次 AC 序列、完整性、缺失源码和输入规模，返回快照指纹 |
+| POST `/api/analyses/create` | 按 analysisScope 创建两次提交或首次 AC 过程分析，202 返回 analysisId |
 | GET `/api/analysis?id=` | 获取进度、已校验结果和候选经验 |
 | POST `/api/analyses/cancel` | 请求取消自己名下的任务 |
 | POST `/api/experiences/from-analysis` | analysisId + candidateKey，用户选择后保存为待确认草稿 |
@@ -173,6 +209,7 @@
 ```json
 {
   "platform": "codeforces",
+  "analysisScope": "pair",
   "beforeSubmissionId": "demo-before",
   "afterSubmissionId": "demo-after",
   "mode": "review",
@@ -183,6 +220,21 @@
 ```
 
 `problemText=null` 明确表示仅代码分析。题面若由用户粘贴，标记为用户输入，不能声称已核验原站内容。提交 ID 必须存在于该用户记录中；上面 demo ID 仅用于说明协议。
+
+首次 AC 过程预览请求：
+
+```json
+{
+  "platform": "codeforces",
+  "problemId": "demo-problem",
+  "analysisScope": "first_ac",
+  "mode": "review"
+}
+```
+
+后端根据用户记录确定序列，不信任客户端自报“这是第一次 AC”。预览返回 orderedSubmissionIds、firstAcId、coverageState、missingSourceIds、historyCoverage、inputSize、previewFingerprint。创建时携带该指纹及用户选择的完整性降级选项；如果范围改变则返回 409，要求重新预览。缺源码不允许原样创建完整任务，但可以显式以 partial 范围继续；未 AC 只能以 no_ac 范围继续。
+
+分析输出除共用字段外，全过程增加 timeline、stepReviews（每个相邻步骤）、journeySummary、evidenceStepIds。服务器检查步骤顺序、提交引用和首次 AC 截止点，不能让模型添加不存在的提交。来源范围不能在编辑经验正文时被用户误改为“完整”。
 
 ## 7. 相关经验检索与去重
 
@@ -205,7 +257,7 @@
 
 建议顺序：一次非流式结构化调用 → 校验结果 → 展示。先不增加逐 token 打字效果，避免展示尚未完成校验的候选结论。输入模板要求 JSON，但仍需服务器检查字段类型、长度、引用范围，不能认为 JSON 模式保证语义正确。
 
-- 模板输出字段：summary、observations、hypotheses、suggestedTests、candidateExperiences、limitations。
+- 两次提交模板输出字段：summary、observations、hypotheses、suggestedTests、candidateExperiences、limitations；全过程模板另含 timeline、stepReviews、journeySummary。两类模板独立版本管理。
 - 输出 token 预算初设 4000，应用输入预算独立于供应商上下文上限。
 - 每用户同一时刻一个任务；应用级并发建议 2，不使用供应商极限作为本项目并发目标。
 - timeout 建议 90 秒，失败给出可读错误；未知是否已经计费的失败不自动反复重试。
@@ -219,12 +271,13 @@
 | 优先级 | 内容 | 完成判据 |
 | --- | --- | --- |
 | P0 | 手动经验 CRUD、搜索、收藏、待确认与确认 | 不依赖模型也能完整使用 |
-| P0 | 题目 / 两次提交来源 | 点击能回到准确版本，权限隔离 |
+| P0 | 题目 / 两次提交 / 首次 AC 序列来源 | 点击能回到准确范围与步骤，权限隔离 |
 | P0 | 同题两次提交 AI 分析 | 输入范围清楚，证据可核对，失败可恢复 |
+| P0 | 首次 AC 全过程 AI 复盘 | 包含首次提交至首次 AC 的所有可用记录，缺失与无 AC 状态明确 |
 | P0 | 选中候选 → 草稿 → 用户确认 | 不自动写入已确认经验 |
 | P1 | 相关经验本地检索 | 有匹配依据，用户可移除 |
 | P1 | 回收站、冲突处理、导出 | 删除可恢复，多标签页不静默覆盖 |
-| 后续 | 整道题修改链、手动合并、多 OJ 实装 | 等单次分析稳定后添加 |
+| 后续 | 大序列分段汇总、手动合并、多 OJ 实装 | 两类分析稳定后添加 |
 | 不做 | 自动判定掌握度、自动错误排名、自动修正提交 | 证据与时间条件不足 |
 
 两天四人分工建议：A 经验数据/API；B 经验页与来源入口；C 模型适配、结果校验与候选提取；D 集成测试、需求/设计/验收文档。先共同冻结请求响应契约，再分头实现；最后预留至少半天联调。这是后续开发安排，本轮未启动开发或模型调用。
@@ -243,11 +296,16 @@
 10. API 超时、无效密钥、余额不足、输出不完整分别显示可理解状态；不泄露密钥和签名 URL。
 11. 回收站恢复保留来源、来源删除后仍能查看自己的已保存证据快照。
 12. 新旧版本启动检查避免再次出现“页面已更新、后端未更新”卡死。
+13. 序列 WA → WA → TLE → AC → AC 只截取前四条，首次 AC 后的记录不参与首次过程复盘。
+14. 历史仅 AC、分页未遍历或中间源码缺失时，不显示完整首次 AC 结论。
+15. 全程无 AC、第一条即 AC、含 CE/RE、同秒多条提交都有明确状态和稳定顺序。
+16. 全过程经验引用完整序列及具体证据步骤；从经验卡回到分析时打开对应复盘范围。
+17. 模式切换不串候选经验；两次提交候选不能误关联到全过程。
 
 ## 11. 本轮希望评审的重点
 
 - 卡片结构是否符合你实际复盘习惯，是否希望再减少必填项？
 - 默认由你确认后入库，是否保留 AI 候选待确认箱？
-- 第一版先做“两次提交分析”，再做整题修改链，是否合适？
+- 两个并列入口、逐步证据与全过程总结的布局，是否便于你复盘？（两类均在第一版范围内。）
 
-建议先在原型中点击一张卡、筛选待确认、查看示例分析，再试“确认入库”和“写一条经验”，评审操作顺序。原型没有实现正式接口、模型调用、来源抓取和持久化。
+建议先进入“AI 复盘示例”，切换两种范围。在全过程中点击 J1 → J2、J2 → J3、J3 → J4，观察逐步说明；再切换“中间源码缺失”和“尚未 AC”状态。切回完整示例，将过程经验加入待确认，从卡片返回全过程核对来源。原型没有实现正式接口、模型调用、来源抓取和持久化。
