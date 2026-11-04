@@ -23,6 +23,7 @@ import zipfile
 from adapters import ADAPTERS, parse_import, normalize_api_credential
 from domain import summarize, predict, prioritize
 from code_diff import compare_sources
+from review_service import ReviewService, ReviewError, init_tables
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
@@ -77,6 +78,13 @@ def run_source_sync(uid, handle, api_key, api_secret, mode):
             if exhausted or (mode == "recent" and page >= 5):
                 label = "在线源码同步：已遍历历史分页" if exhausted else "在线源码同步：最近最多 1000 次提交"
                 save_records(uid, [], label, compact_profile)
+                if exhausted and mode == "all":
+                    with DB_LOCK, connect() as c:
+                        settings = json.loads(c.execute("SELECT settings FROM users WHERE id=?", (uid,)).fetchone()[0])
+                        settings["historyCoverage"] = {"platform": "codeforces", "handle": handle,
+                            "completeThrough": get_sync_job(uid).get("startedAt", int(time.time())) - 1,
+                            "verifiedAt": int(time.time())}
+                        c.execute("UPDATE users SET settings=? WHERE id=?", (json.dumps(settings), uid))
                 message = f"同步完成：{received} 次提交，取得 {sources} 份源码"
                 if missing:
                     message += f"；{missing} 次未返回源码，请检查 API 凭证是否属于该 handle 或提交是否可访问"
@@ -126,6 +134,7 @@ def init_db():
           url TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0,
           pinned INTEGER NOT NULL DEFAULT 0, completion_mode TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
         ''')
+        init_tables(c)
 
 
 def user_settings(uid):
@@ -164,8 +173,11 @@ def save_records(uid, records, scope, profile=None):
     return {"received": len(records), "added": after - before, "total": after, "handle": handle}
 
 
+REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings)
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "VPLab/0.2"
+    server_version = "VPLab/0.3"
 
     def log_message(self, format, *args):
         pass  # No credentials, submitted code, or import bodies in request logs.
@@ -199,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             self.get_route()
+        except ReviewError as exc:
+            self.send({"error": str(exc)}, exc.status)
         except (ValueError, TypeError, KeyError):
             self.send({"error": "请求参数无效"}, 400)
         except Exception:
@@ -208,10 +222,10 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/health":
-            return self.send({"app": "vplab", "apiVersion": 2})
-        if path in ("/", "/app.js", "/source.js", "/style.css"):
-            name = {"/": "index.html", "/app.js": "app.js", "/source.js": "source.js", "/style.css": "style.css"}[path]
-            mime = {"/": "text/html", "/app.js": "text/javascript", "/source.js": "text/javascript", "/style.css": "text/css"}[path]
+            return self.send({"app": "vplab", "apiVersion": 3})
+        if path in ("/", "/app.js", "/source.js", "/review.js", "/style.css", "/review.css"):
+            name = "index.html" if path == "/" else path[1:]
+            mime = "text/html" if path == "/" else "text/javascript" if path.endswith(".js") else "text/css"
             return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
         uid = self.uid()
         if path == "/api/me":
@@ -222,6 +236,29 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"user": {"id": uid, "username": username}})
         if not uid:
             return self.send({"error": "请先登录"}, 401)
+        q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        if path == "/api/ai/config":
+            return self.send(REVIEWS.config(uid))
+        if path == "/api/experiences":
+            return self.send(REVIEWS.list_cards(uid, q))
+        if path == "/api/experience":
+            return self.send({"card": REVIEWS.get_card(uid, q.get("id", 0))})
+        if path == "/api/analysis":
+            return self.send({"analysis": REVIEWS.analysis(uid, q.get("id", 0))})
+        if path == "/api/analysis/source":
+            analysis = REVIEWS.analysis(uid, q.get("id", 0), True)
+            record = next((r for r in analysis["snapshot"]["records"] if r["externalId"] == q.get("submissionId")), None)
+            if not record:
+                raise ReviewError("该分析快照中没有这份源码。", 404)
+            return self.send({"record": record})
+        if path == "/api/analysis/diff":
+            analysis = REVIEWS.analysis(uid, q.get("id", 0), True)
+            records = {r["externalId"]: r for r in analysis["snapshot"]["records"]}
+            if any(q.get(side) not in records for side in ("before", "after")):
+                raise ReviewError("所选版本不在这次分析的源码快照中。", 404)
+            a, b = records[q["before"]], records[q["after"]]
+            return self.send(compare_sources(a["source"], b["source"], q.get("full") == "1") |
+                             {"before": submission_metadata(a), "after": submission_metadata(b)})
         if path == "/api/sync/source/status":
             return self.send({"job": get_sync_job(uid) or None})
         if path == "/api/diff":
@@ -294,6 +331,15 @@ class Handler(BaseHTTPRequestHandler):
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
                 z.writestr("records.normalized.json", json.dumps(records, ensure_ascii=False, indent=2))
                 z.writestr("problems.json", json.dumps(summarize(records)["problems"], ensure_ascii=False, indent=2))
+                with connect() as c:
+                    lessons = [json.loads(r["payload"]) | {"id": r["id"], "version": r["version"], "createdAt": r["created_at"], "updatedAt": r["updated_at"]}
+                               for r in c.execute("SELECT * FROM experiences WHERE user_id=? AND deleted=0", (uid,))]
+                    analyses = [dict(r) for r in c.execute("SELECT id,status,snapshot,result,model,created_at FROM analyses WHERE user_id=?", (uid,))]
+                for analysis in analyses:
+                    for field in ("snapshot", "result"):
+                        analysis[field] = json.loads(analysis[field]) if analysis[field] else None
+                z.writestr("experiences.json", json.dumps(lessons, ensure_ascii=False, indent=2))
+                z.writestr("analyses.json", json.dumps(analyses, ensure_ascii=False, indent=2))
                 for r in records:
                     if r["source"]:
                         # Export path uses only a validated integer submission ID.
@@ -316,6 +362,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError("请求格式错误")
             self.post_route(urlparse(self.path).path, data)
+        except ReviewError as exc:
+            self.send({"error": str(exc)}, exc.status)
         except (ValueError, TypeError, KeyError) as exc:
             self.send({"error": str(exc)[:250] or "请求参数错误"}, 400)
         except Exception:
@@ -350,7 +398,22 @@ class Handler(BaseHTTPRequestHandler):
             cookie = SimpleCookie(self.headers.get("Cookie", ""))
             with SESSION_LOCK:
                 SESSIONS.pop(cookie["vplab_session"].value, None)
+            REVIEWS.config(uid, {"clear": True})
             return self.send({"ok": True}, extra={"Set-Cookie": "vplab_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+        if path == "/api/ai/config":
+            return self.send(REVIEWS.config(uid, data))
+        if path == "/api/analyses/preview":
+            _, preview = REVIEWS.preview(uid, data)
+            return self.send({"preview": preview})
+        if path == "/api/analyses/create":
+            analysis, reused = REVIEWS.create_analysis(uid, data)
+            return self.send({"analysis": analysis, "reused": reused}, 200 if reused else 202)
+        if path == "/api/analyses/cancel":
+            return self.send({"analysis": REVIEWS.cancel(uid, data.get("id", 0))})
+        if path == "/api/experiences/from-analysis":
+            return self.send(REVIEWS.collect(uid, data))
+        if path in ("/api/experiences/create", "/api/experiences/update", "/api/experiences/confirm", "/api/experiences/delete", "/api/experiences/restore"):
+            return self.send(REVIEWS.save_card(uid, path.rsplit("/", 1)[1], data))
         if path == "/api/sync/source/cancel":
             with JOB_LOCK:
                 if JOBS.get(uid, {}).get("status") == "running":
@@ -477,7 +540,7 @@ def running_vplab(port):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=3) as response:
             health = json.loads(response.read(4096))
-        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 2
+        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 3
     except Exception:
         return False
 
@@ -501,6 +564,7 @@ def main():
         print("Close the previous VP Lab server window and run StartDemo.cmd again.", flush=True)
         print("Or run: python server.py --port 8766 --browser", flush=True)
         raise SystemExit(1)
+    REVIEWS.recover()
     print(f"VP Lab: http://127.0.0.1:{args.port}", flush=True)
     if args.browser:
         threading.Timer(0.7, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()

@@ -1,6 +1,6 @@
 # VP Lab 本地演示版
 
-面向算法竞赛的训练工作台，当前 v0.2 支持在线获取 CF 提交与源码、提交修改对比、画像、概率估算与补题流程。使用 Python 3.10 及以上版本，无第三方运行依赖。
+面向算法竞赛的训练工作台，当前 v0.3 支持在线获取 CF 提交与源码、提交修改对比、代码旁 AI 复盘、个人经验库、画像、概率估算与补题流程。使用 Python 3.10 及以上版本，无第三方运行依赖。
 
 ## 启动
 
@@ -17,6 +17,21 @@
 注册账号、导入数据、源码、偏好和任务保存在 `.local/vplab.sqlite3`，不进入 Git。不同账号的记录互相隔离。重启后需要重新登录，数据仍保留。绑定 handle 不验证归属；一个本地账号暂只对应一个 CF handle。
 
 如果旧版正在运行，先停止旧服务，再重新双击 `StartDemo.cmd`。源码详情也支持新标签页、复制和下载。
+
+## AI 复盘与个人经验库
+
+1. 在“数据与账号 → AI 分析”配置 DeepSeek API Key，也可以在代码旁的分析窗口配置。服务只在内存中保存各账号的密钥；退出登录或重启后重新填写。密钥不保存在浏览器、数据库或导出文件中。
+2. 从“提交历史”打开源码，点击“AI 分析”；或在两份代码对比时点击“AI 分析这次修改”。选择“两次提交”或“首次 AC 全过程”。全过程包含最早记录到第一次 AC 的所有判题结果，排除后续 AC；未观察到 AC 时为阶段复盘。
+3. 查看预览范围，可以补充题面、问题，选择提示或完整解释模式，并附带最多 3 条已确认经验（选择列表展示最近更新的 20 条）。打开窗口、预览、重读结果均不会调用模型；只有点击“开始分析”才会向 DeepSeek 发送选定源码、题面与经验，不发送 CF 凭证。
+4. 分析按提交逐步说明可观察改动、可能原因与尚未运行的候选验证。点击引用可定位分析时保存的代码快照。服务核对引用的提交、行号与原文；引用核对成功不等于原因已经证明。
+5. 将候选“加入待确认”，或在源码旁手动“记录经验”。在“个人经验库”编辑适用场景、规则与检查步骤，再确认入库。支持搜索、状态和来源筛选、收藏、个人练习标记、回收站恢复；同一候选不会重复入库。
+6. 在经验来源中点击“回到代码与已保存分析”，读取原始输入快照与结果。后续同步不会覆盖这些快照；快照对比可逐组查看，无需重新调用模型。新分析需要按当前记录重新预览。
+
+模型通过 `ai_provider.py` 接入 [DeepSeek Chat API](https://api-docs.deepseek.com/api/create-chat-completion)，默认 `deepseek-flash`、非思考模式、JSON 输出；可在启动前用 `VPLAB_AI_MODEL` 修改模型名，地址固定为官方接口。调用上限为 90 秒，单次输入最多 100000 字符 / 20 次修改，不静默截断全过程。模型输出不完整时标记失败，手动重试，不自动重复付费请求。相同输入的成功结果会复用。每账号最多一个运行任务，全服务最多两个；停止接收结果不保证供应商停止计费。
+
+旧导入文件和旧版同步记录不具有完整历史证明。新版“全部历史提交”成功遍历后才记录覆盖范围；缺少历史或源码时提示片段复盘，需要主动勾选后开始。题面当前需要手动粘贴，未自动抓取；没有题面时明确限制为代码分析。当前不执行生成用例，不自动确认经验或判定掌握程度，不提供向量检索。源码引用核验失败的候选不能直接入库。
+
+分析快照、结果、经验及修改版本持久化在原 SQLite 数据库，按登录账号隔离；ZIP 导出增加 `analyses.json` 与 `experiences.json`。服务重启会将未完成任务标记为中断，已保存结果和经验仍可查看。运行前建议备份 `.local/vplab.sqlite3`。`design/` 保留早期独立设计稿，实际功能位于主应用的代码查看和经验库页面。
 
 ## 在线源码同步
 
@@ -46,6 +61,8 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 - `adapters.py`：平台协议、能力声明、CF 数据规范化及同步。
 - `domain.py`：纯统计、概率估算、补题排序，可独立替换模型。
 - `server.py`：HTTP 接口、账号会话、SQLite 持久化、按用户授权。
+- `review_service.py`：分析范围、快照、任务与证据验证、经验库和版本控制。
+- `ai_provider.py`：模型供应商边界，结构化请求和错误处理，不执行源码。
 - `static/`：无构建依赖的响应式前端。
 
 业务接口：`/api/dashboard`、`/api/problem`、`/api/import`、`/api/sync`、`/api/predict`、`/api/tasks/create`、`/api/tasks/update`、`/api/settings`、`/api/export`。
@@ -60,11 +77,22 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 | GET `/api/submissions?q=&verdict=&source=&page=` | 每页 25 条历史记录；source 为 yes/no/空，列表不返回代码正文 |
 | GET `/api/submission?id=&platform=codeforces` | 读取一次提交及源码 |
 | GET `/api/diff?before=&after=&full=0` | 同题两次提交的逐行和行内差异；full=1 显示完整上下文 |
+| GET / POST `/api/ai/config` | 查询配置状态；`apiKey` 配置内存密钥，`clear:true` 清除。不返回密钥 |
+| POST `/api/analyses/preview` | `analysisScope:pair/first_ac`、题号或两次提交 ID、可选题面/问题/经验 ID；返回指纹、范围和阻断原因，不调用模型 |
+| POST `/api/analyses/create` | 同预览参数，加 `fingerprint`；片段需 `allowPartial:true`；新任务 202，已有结果复用 200 |
+| GET `/api/analysis?id=` | 持久化任务状态、结构化结果和输入范围 |
+| GET `/api/analysis/source?id=&submissionId=` | 读取该次分析的不可变源码快照 |
+| GET `/api/analysis/diff?id=&before=&after=&full=0` | 比较该次分析的两份源码快照 |
+| POST `/api/analyses/cancel` | `id`，停止接收结果，不自动重试 |
+| GET `/api/experiences` / `/api/experience?id=` | 分页搜索筛选 / 经验详情 |
+| POST `/api/experiences/from-analysis` | `analysisId,candidateKey`，校验引用后幂等收藏为待确认 |
+| POST `/api/experiences/create` | 手动记录，`reviewState:pending/confirmed`，可附 `problemKey` |
+| POST `/api/experiences/update,confirm,delete,restore` | 分别为四个路径，`id,expectedVersion`；版本冲突返回 409 |
 
 平台唯一键保留 `platform + externalId/problemKey`，原始难度体系保留为 `difficultyScale`。新 OJ 应新增适配器并声明能力；不能把缺失的难度或标签用零值伪造。后续需将当前单 CF 绑定设置迁移为多平台绑定表，并为任务增加平台字段。
 
 ## 验证
 
-运行 `python -m unittest discover -s tests -v` 和 `node tests/test_ui.cjs`。测试使用临时数据库，不会修改实际用户记录。在线 API 使用模拟响应验证签名、分页、失败保留和中止，不表示已经用真实凭证完成线上验证。前端测试是模板与交互逻辑单元测试，不替代浏览器视觉验收。
+运行 `python -m unittest discover -s tests -v` 和 `node tests/test_ui.cjs`。测试使用临时数据库，不会修改实际用户记录。在线 API 使用模拟响应验证签名、分页、失败保留和中止，不表示已经用真实凭证完成线上验证。AI 测试模拟供应商响应，覆盖首次 AC 截止、缺失源码、任务取消、结果复用、证据拒绝、快照不可变、账号隔离、经验确认和版本冲突；不代表真实模型分析质量已验收。前端测试检查模板与异步交互逻辑，不替代浏览器视觉验收。
 
 现有导出器作为外部数据输入，本项目没有复制第三方开源仓库代码；平台适配思想参考之前调研的 icpc-workbench，所有界面和实现为本次新建。
