@@ -1,0 +1,24 @@
+# User data and exported submissions
+/codeforces_*_decoded/
+/codeforces_*_decoded.zip
+*.jsonl
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+
+# Runtime state and credentials
+.local/
+.env
+.env.*
+!.env.example
+*.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local editor settings
+.idea/
+.vscode/
