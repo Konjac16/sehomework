@@ -13,6 +13,7 @@ function element(key) {
 const context = vm.createContext({console,URLSearchParams,setTimeout,clearTimeout,assert,
   location:{search:''}, window:{scrollTo(){}},
   document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}}});
+vm.runInContext(readFileSync(join(__dirname,'../static/statement.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/review.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/source.js'),'utf8'),context);
 const appScript=readFileSync(join(__dirname,'../static/app.js'),'utf8').replace(/startApplication\(\);\s*$/,'');
@@ -43,7 +44,7 @@ async function run(){
   await vm.runInContext(`openComparison('1900A','1')`,context);
   vm.runInContext(`assert.equal(sourceUI.comparison.before,'');resetSourceUI();assert.equal(sourceUI.comparison,null);assert.equal(state.detail.length,0);`,context);
   assert.equal(element('#detail').open,false);
-  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:3}:{user:null};`,context);
+  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:4}:{user:null};`,context);
   await vm.runInContext('startApplication()',context);
   assert.equal(element('#boot-status').hidden,true);
   assert.equal(element('#auth').hidden,false);
@@ -61,11 +62,18 @@ async function run(){
     sourceUI.comparison={key:'1900A',before:'1',after:'2',rows:[fixture,{...fixture,externalId:'2',submittedAt:2,verdict:'OK'}],request:0};
     let calls=[];api=async(path)=>{calls.push(path);if(path==='/api/ai/config')return {configured:true,model:'test'};
     if(path.startsWith('/api/experiences'))return {rows:[]};
-    if(path==='/api/analyses/preview')return {preview:{fingerprint:'abc',timeline:[],warnings:[],blockers:[],coverageState:'pair',inputCharacters:10}};
+    if(path==='/api/problem/statement')return {statement:{text:'',status:'unavailable',message:'HTTP 403'}};
+    if(path==='/api/analyses/preview')return {preview:{fingerprint:'abc',problem:{textOrigin:'missing'},timeline:[],warnings:[],blockers:[],coverageState:'pair',inputCharacters:10}};
     throw new Error('Unexpected model request: '+path);};`, context);
   await vm.runInContext(`openReview('compare')`,context);
   vm.runInContext(`assert(!calls.includes('/api/analyses/create'));assert.equal(reviewUI.preview.fingerprint,'abc');`,context);
   assert(element('#review-side').innerHTML.includes('data-start-review'));
+  vm.runInContext(`assert.equal(originalProblemUrl({problemKey:'1900A'}),'https://codeforces.com/contest/1900/problem/A');
+    assert.equal(originalProblemUrl({problemKey:'100001A1'}),'https://codeforces.com/gym/100001/problem/A1');
+    assert.equal(originalProblemUrl({problemKey:'javascript:alert(1)'}),'');
+    assert(compareView().includes('查看原题'));
+    assert(statementBody({text:'<script>alert(1)</script>',textOrigin:'codeforces'},'1900A').includes('&lt;script&gt;'));
+    assert(!statementBody({text:'<script>alert(1)</script>'},'1900A').includes('<script>'));`,context);
   vm.runInContext(`const unsafe={id:3,status:'succeeded',model:'test',completedAt:1,result:{summary:'<script>alert(1)</script>',steps:[],limitations:[],candidates:[{key:'0',title:'<img>',rule:'rule',tags:[],evidenceValid:false}]}};
     const html=reviewResult(unsafe);assert(html.includes('&lt;script&gt;'));assert(!html.includes('<script>'));
     assert(html.includes('data-candidate="0" disabled'));closeReview();assert.equal(reviewUI.open,false);`,context);

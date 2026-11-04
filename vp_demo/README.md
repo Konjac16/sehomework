@@ -29,9 +29,17 @@
 
 模型通过 `ai_provider.py` 接入 [DeepSeek Chat API](https://api-docs.deepseek.com/api/create-chat-completion)，默认 `deepseek-flash`、非思考模式、JSON 输出；可在启动前用 `VPLAB_AI_MODEL` 修改模型名，地址固定为官方接口。调用上限为 90 秒，单次输入最多 100000 字符 / 20 次修改，不静默截断全过程。模型输出不完整时标记失败，手动重试，不自动重复付费请求。相同输入的成功结果会复用。每账号最多一个运行任务，全服务最多两个；停止接收结果不保证供应商停止计费。
 
-旧导入文件和旧版同步记录不具有完整历史证明。新版“全部历史提交”成功遍历后才记录覆盖范围；缺少历史或源码时提示片段复盘，需要主动勾选后开始。题面当前需要手动粘贴，未自动抓取；没有题面时明确限制为代码分析。当前不执行生成用例，不自动确认经验或判定掌握程度，不提供向量检索。源码引用核验失败的候选不能直接入库。
+旧导入文件和旧版同步记录不具有完整历史证明。新版“全部历史提交”成功遍历后才记录覆盖范围；缺少历史或源码时提示片段复盘，需要主动勾选后开始。题面自动获取方式见下文；没有题面时明确限制为代码分析。当前不执行生成用例，不自动确认经验或判定掌握程度，不提供向量检索。源码引用核验失败的候选不能直接入库。
 
 分析快照、结果、经验及修改版本持久化在原 SQLite 数据库，按登录账号隔离；ZIP 导出增加 `analyses.json` 与 `experiences.json`。服务重启会将未完成任务标记为中断，已保存结果和经验仍可查看。运行前建议备份 `.local/vplab.sqlite3`。`design/` 保留早期独立设计稿，实际功能位于主应用的代码查看和经验库页面。
+
+## 原题链接与自动题面
+
+源码查看、代码对比和 AI 侧栏均提供原题链接。打开当前记录的源码或对比页时，自动读取 CF 公开题面；代码立即显示，不等待题面。提取题意、约束、输入输出、样例和备注，保留 LaTeX 原文与样例换行。展示纯文本，不执行原站 HTML；题面包含图片时明确提示，当前不下载图片或进行视觉识别。
+
+公开题面按平台和题号缓存在 SQLite；成功缓存默认使用 7 天，可主动刷新，同题刷新至少间隔 60 秒。失败缓存 60 秒，全局串行访问且间隔至少 2.1 秒，网络超时 18 秒；刷新失败保留已有文字。接口只允许获取当前用户已有记录的题目，URL 由适配器生成，不接受任意网址，不携带 CF 凭证。后续平台可实现 `PlatformAdapter.fetch_statement(record)`。
+
+AI 预览和创建默认使用缓存题面，将来源、原题链接、获取时间和正文保存到不可变分析快照。手动填写题面时明确记为用户补充，优先于自动结果；刷新造成输入变化时需重新预览。CF 返回 403、429、验证页面或登录页时显示失败原因，不冒充获取成功；可以打开原题、稍后重试或手动补充。当前本机对 CF 1900A 的真实网络验证返回 HTTP 403，成功解析路径通过模拟页面测试，尚未在本机验证线上成功抓取。
 
 ## 在线源码同步
 
@@ -63,6 +71,7 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 - `server.py`：HTTP 接口、账号会话、SQLite 持久化、按用户授权。
 - `review_service.py`：分析范围、快照、任务与证据验证、经验库和版本控制。
 - `ai_provider.py`：模型供应商边界，结构化请求和错误处理，不执行源码。
+- `problem_statement.py`：题面 HTML 提取、固定原站地址、缓存与限流。
 - `static/`：无构建依赖的响应式前端。
 
 业务接口：`/api/dashboard`、`/api/problem`、`/api/import`、`/api/sync`、`/api/predict`、`/api/tasks/create`、`/api/tasks/update`、`/api/settings`、`/api/export`。
@@ -77,6 +86,7 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 | GET `/api/submissions?q=&verdict=&source=&page=` | 每页 25 条历史记录；source 为 yes/no/空，列表不返回代码正文 |
 | GET `/api/submission?id=&platform=codeforces` | 读取一次提交及源码 |
 | GET `/api/diff?before=&after=&full=0` | 同题两次提交的逐行和行内差异；full=1 显示完整上下文 |
+| POST `/api/problem/statement` | `platform,problemKey,refresh`；获取或读取公开题面缓存，返回 `statement.status/text/url/textOrigin/fetchedAt/message`；失败状态为 unavailable，有旧内容时为 stale |
 | GET / POST `/api/ai/config` | 查询配置状态；`apiKey` 配置内存密钥，`clear:true` 清除。不返回密钥 |
 | POST `/api/analyses/preview` | `analysisScope:pair/first_ac`、题号或两次提交 ID、可选题面/问题/经验 ID；返回指纹、范围和阻断原因，不调用模型 |
 | POST `/api/analyses/create` | 同预览参数，加 `fingerprint`；片段需 `allowPartial:true`；新任务 202，已有结果复用 200 |

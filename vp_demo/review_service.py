@@ -120,8 +120,9 @@ def validate_output(raw, snapshot):
 
 
 class ReviewService:
-    def __init__(self, connect, db_lock, records, settings):
+    def __init__(self, connect, db_lock, records, settings, statement=None):
         self.connect, self.db_lock, self.records, self.settings = connect, db_lock, records, settings
+        self.statement = statement or (lambda record: None)
         self.provider = DeepSeekProvider()
         self.lock = threading.RLock()
         self.keys = {}
@@ -267,6 +268,15 @@ class ReviewService:
             if between:
                 warnings.append(f"选定版本之间还有 {len(between)} 次提交，本次只分析所选两份代码。")
         statement = text_field(data.get("problemText", ""), "题面", 40000)
+        statement_info = {"url": rows[0]["url"], "textOrigin": "user" if statement else "missing"}
+        if not statement:
+            cached = self.statement(rows[0])
+            if cached and cached.get("text"):
+                statement = cached["text"]
+                statement_info.update({k: cached[k] for k in ("url", "textOrigin", "fetchedAt") if k in cached})
+                warnings.extend(cached.get("warnings", []))
+                if cached.get("status") == "stale":
+                    warnings.append("题面刷新失败，使用之前保存的题面版本。")
         question = text_field(data.get("question", ""), "分析问题", 2000)
         mode = data.get("mode", "hint" if rows[-1]["verdict"] != "OK" else "review")
         if mode not in ("hint", "review"):
@@ -283,7 +293,7 @@ class ReviewService:
                 raise ReviewError("只能引用已确认、未删除的个人经验。")
             related.append({k: card[k] for k in ("id", "version", "title", "scenario", "rule", "checklist")})
         snapshot = {"analysisScope": scope, "coverageState": coverage, "problem": {"platform": platform, "problemKey": key,
-                    "title": rows[0]["title"], "text": statement, "textOrigin": "user" if statement else "missing"},
+                    "title": rows[0]["title"], "text": statement, **statement_info},
                     "records": available, "timeline": [{k: r[k] for k in ("externalId", "submittedAt", "verdict", "participantType")} |
                     {"hasSource": bool(r["source"])} for r in rows], "missingSourceIds": missing, "steps": steps,
                     "warnings": warnings, "question": question, "mode": mode, "relatedExperiences": related,

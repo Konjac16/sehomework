@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 from typing import Protocol
+from problem_statement import fetch_cf_statement
 
 
 def normalize_api_credential(value, label):
@@ -45,14 +46,18 @@ class PlatformAdapter(Protocol):
 
     def normalize(self, record: dict) -> dict: ...
     def sync(self, handle: str) -> dict: ...
+    def fetch_statement(self, record: dict) -> dict: ...
 
 
 class CodeforcesAdapter:
     platform = "codeforces"
     capabilities = {"submissions": True, "tags": True, "difficulty": True,
-                    "sourceImport": True, "sourceSync": True}
+                    "sourceImport": True, "sourceSync": True, "problemStatement": True}
     _lock = threading.Lock()
     _last_call = 0.0
+
+    def fetch_statement(self, record):
+        return fetch_cf_statement(record)
 
     def normalize(self, record):
         s = record.get("submission", record)

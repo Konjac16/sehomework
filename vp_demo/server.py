@@ -24,6 +24,7 @@ from adapters import ADAPTERS, parse_import, normalize_api_credential
 from domain import summarize, predict, prioritize
 from code_diff import compare_sources
 from review_service import ReviewService, ReviewError, init_tables
+from problem_statement import StatementService
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
@@ -135,6 +136,7 @@ def init_db():
           pinned INTEGER NOT NULL DEFAULT 0, completion_mode TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
         ''')
         init_tables(c)
+        StatementService.init_tables(c)
 
 
 def user_settings(uid):
@@ -173,7 +175,8 @@ def save_records(uid, records, scope, profile=None):
     return {"received": len(records), "added": after - before, "total": after, "handle": handle}
 
 
-REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings)
+STATEMENTS = StatementService(connect, ADAPTERS)
+REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings, STATEMENTS.cached)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -222,8 +225,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/health":
-            return self.send({"app": "vplab", "apiVersion": 3})
-        if path in ("/", "/app.js", "/source.js", "/review.js", "/style.css", "/review.css"):
+            return self.send({"app": "vplab", "apiVersion": 4})
+        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/style.css", "/review.css"):
             name = "index.html" if path == "/" else path[1:]
             mime = "text/html" if path == "/" else "text/javascript" if path.endswith(".js") else "text/css"
             return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
@@ -402,6 +405,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"ok": True}, extra={"Set-Cookie": "vplab_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
         if path == "/api/ai/config":
             return self.send(REVIEWS.config(uid, data))
+        if path == "/api/problem/statement":
+            platform = data.get("platform", "codeforces")
+            record = next((r for r in user_records(uid) if r["platform"] == platform and r["problemKey"] == data.get("problemKey")), None)
+            if record is None:
+                raise ReviewError("题目不存在或不属于当前训练记录。", 404)
+            return self.send({"statement": STATEMENTS.get(record, data.get("refresh") is True)})
         if path == "/api/analyses/preview":
             _, preview = REVIEWS.preview(uid, data)
             return self.send({"preview": preview})
@@ -540,7 +549,7 @@ def running_vplab(port):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=3) as response:
             health = json.loads(response.read(4096))
-        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 3
+        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 4
     except Exception:
         return False
 
