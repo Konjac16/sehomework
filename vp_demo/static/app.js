@@ -2,13 +2,13 @@
 const $ = (s, root = document) => root.querySelector(s);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const e = escapeHtml;
-const names = {overview:'训练概览', portrait:'能力画像', problems:'题目与代码', predict:'概率实验室', tasks:'补题计划', settings:'数据与账号', history:'提交历史', compare:'代码对比',experiences:'个人经验库'};
+const names = {overview:'训练概览', training:'日常练习', portrait:'能力画像', problems:'题目与代码', predict:'概率实验室', tasks:'补题计划', settings:'数据与账号', history:'提交历史', compare:'代码对比',experiences:'个人经验库'};
 let state = {user:null, data:null, tab:'overview', page:1, filter:{q:'',tag:'',band:'',status:''}, registering:true, detail:[], prediction:null};
 let toastTimer;
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').hidden=true,6000); }
 async function api(path, data) {
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),path==='/api/sync'?90000:30000);
+  const timer=setTimeout(()=>controller.abort(),['/api/sync','/api/training/refresh','/api/recommendations'].includes(path)?90000:30000);
   try {
   const response = await fetch(path, {...(data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),signal:controller.signal});
   const result = await response.json();
@@ -26,7 +26,7 @@ function rating(v) { return v == null ? '<span class="badge gray">未评级</spa
 function heading(kicker,title,description,action='') {return `<div class="page-heading"><div><span class="eyebrow">${kicker}</span><h1>${title}</h1><p>${description}</p></div>${action}</div>`;}
 function empty(title,description,button='') {return `<div class="empty"><b>${title}</b>${description}${button?`<div>${button}</div>`:''}</div>`;}
 function dataNotice(){return state.data.onlyAccepted?'<div class="notice"><strong>当前数据仅包含 AC 提交。</strong> 以下展示已完成题目的积累；不据此计算真实通过率、失败次数或判定弱项。</div>':'<div class="notice neutral">统计仅覆盖已导入或同步的记录，不代表完整历史。不同题型可能重叠；自由练习与比赛表现尚未分开建模。</div>';}
-function showAuth(){resetHelper();resetReviewUI();resetSourceUI();state.user=null;state.data=null;state.prediction=null;$('#auth').hidden=false;$('#shell').hidden=true;}
+function showAuth(){resetTraining();resetHelper();resetReviewUI();resetSourceUI();state.user=null;state.data=null;state.prediction=null;$('#auth').hidden=false;$('#shell').hidden=true;}
 async function load(){
   const generation=sourceUI.generation;
   const data=await api('/api/dashboard');
@@ -50,8 +50,9 @@ function render(){
   if(!state.data)return;
   document.querySelectorAll('#navigation button').forEach(b=>b.classList.toggle('active',b.dataset.tab===state.tab));
   $('#page-label').textContent=names[state.tab];
-  const views={overview,portrait,problems,predict:predictionView,tasks,settings,history:historyView,compare:compareView,experiences:experienceView};
+  const views={overview,training:trainingView,portrait,problems,predict:predictionView,tasks,settings,history:historyView,compare:compareView,experiences:experienceView};
   $('#main').innerHTML=views[state.tab]();
+  if(state.tab==='training')loadTraining();else resetTraining();
   if(state.tab==='history')renderHistory();
   if(state.tab==='compare'){renderDiff();syncReviewContext('compare');if(sourceUI.comparison&&!sourceUI.comparison.savedAnalysisId)loadStatementPanel(sourceUI.comparison.key,'compare-statement');}
   if(state.tab==='experiences')loadExperiences();
@@ -106,6 +107,7 @@ async function detail(key, selectedId=null){const generation=sourceUI.generation
 function updateSource(i){const r=state.detail[i];$('#source-new-tab').href='/?submission='+encodeURIComponent(r.externalId);$('#source-code').textContent=r.source||'这次提交尚未获取源码。请到“数据与账号”使用该 CF 账号的 API Key / Secret 同步源码。';$('#source-meta').textContent=`${r.language} · ${r.timeMs??'—'} ms · ${r.memoryBytes==null?'—':(r.memoryBytes/1024/1024).toFixed(1)} MB · ${r.participantType}`;$('#copy-source').disabled=!r.source;$('#save-source').disabled=!r.source;syncReviewContext('single');}
 function taskDialog(task=null, seed={}){closeReview();const s=task||seed;const editing=Boolean(task);$('#detail-content').innerHTML=`<div class="dialog-head"><div><span class="eyebrow">PRACTICE PLAN</span><h2>${editing?'记录学习进展':'添加一道训练题'}</h2></div><button class="close-dialog" data-close aria-label="关闭">×</button></div><form id="task-form" data-id="${task?.id||''}">${editing?`<h3>${e(task.title)}</h3><label style="margin-top:18px">状态<select name="done"><option value="0">待完成</option><option value="1" ${task.done?'selected':''}>已完成</option></select></label><label>完成方式<select name="completionMode"><option value="">尚未完成</option>${[['independent','独立完成'],['hint','参考提示'],['editorial','阅读题解']].map(([v,n])=>`<option value="${v}" ${task.completion_mode===v?'selected':''}>${n}</option>`).join('')}</select></label><label>个人笔记<textarea name="note" rows="4" maxlength="2000" placeholder="记录卡点、收获或下次需要注意的地方">${e(task.note)}</textarea></label>`:`<label>题目名称<input name="title" required maxlength="160" value="${e(s.title||'')}"></label><div class="field-row"><label>CF 题号（可选）<input name="problemKey" value="${e(s.problemKey||'')}" placeholder="例如 1900A"></label><label>题目难度（可选）<input name="rating" type="number" min="800" max="4000" step="100" value="${s.rating??''}"></label></div><label>算法标签（逗号分隔）<input name="tags" value="${e((s.tags||[]).join(', '))}" placeholder="dp, trees"></label><label>CF 题目链接（可选）<input name="url" type="url" value="${e(s.url||'')}" placeholder="https://codeforces.com/contest/…"></label>`}<button class="primary wide">${editing?'保存进展':'加入计划'}</button><p class="help">已通过的题也可以作为复习任务加入。手动完成标记不会伪造 AC 提交或改变题库统计。</p></form>`;if(!$('#detail').open)$('#detail').showModal();}
 async function submitHandler(event){
+ if(event.target.id.startsWith('training-'))return;
  event.preventDefault();const form=event.target,button=form.querySelector('button[type=submit],button.primary');if(!button)return;const original=button.innerHTML;button.disabled=true;button.textContent='处理中…';
  try {const f=new FormData(form);
  if(form.id==='auth-form'){await api(state.registering?'/api/register':'/api/login',{username:f.get('username'),password:f.get('password')});form.reset();await enter();}

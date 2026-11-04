@@ -18,9 +18,24 @@ vm.runInContext(readFileSync(join(__dirname,'../static/statement-format.js'),'ut
 vm.runInContext(readFileSync(join(__dirname,'../static/statement.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/review.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/source.js'),'utf8'),context);
+vm.runInContext(readFileSync(join(__dirname,'../static/training.js'),'utf8'),context);
 const appScript=readFileSync(join(__dirname,'../static/app.js'),'utf8').replace(/startApplication\(\);\s*$/,'');
 vm.runInContext(appScript,context);
 async function run(){
+  vm.runInContext(`const practiceProblem={platform:'codeforces',externalId:'1A',problemKey:'1A',title:'<unsafe>',rating:1800,tags:['secret-tag'],url:'https://codeforces.com/contest/1/problem/A'};
+    assert(!trainingProblem(practiceProblem).includes('secret-tag'));
+    assert.equal((trainingReason().match(/<option /g)||[]).length,5);
+    assert(trainingProblem(practiceProblem).includes('&lt;unsafe&gt;'));
+    const feedbackHtml=trainingFeedback({id:1,problem:practiceProblem,acId:'123'});
+    assert.equal((feedbackHtml.match(/required/g)||[]).length,3);
+    assert(!feedbackHtml.includes('data-training="skip"'));
+    assert(!feedbackHtml.includes('secret-tag'));
+    state.user={id:1};state.tab='overview';
+    let finishTrainingRequest;api=()=>new Promise(resolve=>finishTrainingRequest=resolve);
+    let pendingTrainingRequest=trainingRequest('/api/training');resetTraining();
+    finishTrainingRequest({recommendation:practiceProblem,active:null,pending:[]});`,context);
+  await vm.runInContext('pendingTrainingRequest',context);
+  vm.runInContext('assert.equal(trainingUI.data,null);',context);
   vm.runInContext(`state.user={id:1,username:'tester'};state.data={settings:{},tags:[],tasks:[],sampleAvailable:false};
     assert(onlineSettings().includes('id="source-sync-form"'));
     assert(onlineSettings().indexOf('id="source-sync-form"')<onlineSettings().indexOf('id="import-form"'));

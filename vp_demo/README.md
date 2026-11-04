@@ -100,6 +100,16 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 
 业务接口：`/api/dashboard`、`/api/problem`、`/api/import`、`/api/sync`、`/api/predict`、`/api/tasks/create`、`/api/tasks/update`、`/api/settings`、`/api/export`。
 
+### 日常练习
+
+左侧「日常练习」每次推荐一道 CF 题目，不显示题目标签。默认参考水平取当前 CF Rating，无评级则用 1800；轻松、正常、挑战三个默认区间均跨度 400，也可手动设置固定上下限。按长期覆盖与最近 10 道训练题的标签权重先选方向、再选题；具体规则和接口见 [日常练习设计](design/daily-training.md)。
+
+点击「开始训练」才建立记录；换题或跳过原因可不填，当天冷却，已开始的题保留在「尝试过的题目」。只有同步到开始后的 CF AC 才能进入必填反馈（独立 / 提示 / 题解），反馈完成后推荐下一题。每 3 道有效反馈评估一次训练参考水平；官方 Rating 变化时覆盖并重置评估窗口。页面每分钟尝试同步有未完成记录的账号，也可手动同步；最近 1000 次提交之外的记录需要通过已有历史同步入口补齐。
+
+`training_service.py` 负责持久化状态、过滤、权重选题和参考水平，`static/training.js` / `training.css` 为独立页面模块。通过适配器获取题库，缓存 24 小时；题库 API 当前使用 CF 官方 `problemset.problems`。只推荐有难度的题，不声称覆盖全部 Gym。无候选时不自动放宽条件。专项训练、赛后补题、经验巩固、整场 VP 尚未开放。
+
+新增接口均要求登录：GET `/api/training`、GET/POST `/api/training/preferences`、POST `/api/recommendations`、POST `/api/training/start,dismiss,skip,resume,feedback,refresh`（分别为六个路径）。写接口沿用现有 POST 约定，状态响应不包含标签。运行 `python -m unittest discover -s tests -p test_training.py -v` 验证训练规则；接口鉴权和状态流转纳入 `test_demo.py`，前端模板和异步隔离纳入 `test_ui.cjs`。
+
 新增接口（均要求登录，并按当前用户隔离）：
 
 | 方法 / 路径 | 用途 |

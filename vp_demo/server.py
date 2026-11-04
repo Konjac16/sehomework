@@ -26,6 +26,7 @@ from code_diff import compare_sources
 from review_service import ReviewService, ReviewError, init_tables
 from problem_statement import StatementService
 from browser_bridge import BrowserBridge
+from training_service import TrainingService
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
@@ -138,6 +139,7 @@ def init_db():
         ''')
         init_tables(c)
         StatementService.init_tables(c)
+        TrainingService.init_tables(c)
 
 
 def user_settings(uid):
@@ -173,12 +175,14 @@ def save_records(uid, records, scope, profile=None):
         if profile:
             settings["profile"] = profile
         c.execute("UPDATE users SET settings=? WHERE id=?", (json.dumps(settings, ensure_ascii=False), uid))
+        TRAINING.reconcile(uid, c)
     return {"received": len(records), "added": after - before, "total": after, "handle": handle}
 
 
 STATEMENTS = StatementService(connect, ADAPTERS)
 REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings, STATEMENTS.cached_for)
 BRIDGE = BrowserBridge(STATEMENTS)
+TRAINING = TrainingService(connect, DB_LOCK, ADAPTERS)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -247,7 +251,7 @@ class Handler(BaseHTTPRequestHandler):
                     if file.suffix in ('.js', '.json', '.txt'):
                         z.write(file, 'VP-Lab-Browser-Helper/' + file.name)
             return self.send(buf.getvalue(), content_type='application/zip', extra={'Content-Disposition': 'attachment; filename="VP-Lab-Browser-Helper.zip"'})
-        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/statement-format.js", "/helper.js", "/style.css", "/review.css"):
+        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/statement-format.js", "/helper.js", "/training.js", "/training.css", "/style.css", "/review.css"):
             name = "index.html" if path == "/" else path[1:]
             mime = "text/html" if path == "/" else "text/javascript" if path.endswith(".js") else "text/css"
             return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
@@ -261,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
         if not uid:
             return self.send({"error": "请先登录"}, 401)
         q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        if path in ("/api/training", "/api/training/preferences"):
+            return self.send(TRAINING.state(uid))
         if path == '/api/browser/status':
             return self.send({'job': BRIDGE.status(uid, q.get('id', ''))})
         if path == "/api/ai/config":
@@ -431,6 +437,20 @@ class Handler(BaseHTTPRequestHandler):
         uid = self.uid()
         if not uid:
             return self.send({"error": "请先登录"}, 401)
+        if path == "/api/training/preferences":
+            return self.send(TRAINING.preferences(uid, data))
+        if path == "/api/recommendations":
+            return self.send(TRAINING.recommend(uid, data))
+        if path in ("/api/training/start", "/api/training/dismiss", "/api/training/skip", "/api/training/resume", "/api/training/feedback"):
+            return self.send(TRAINING.act(uid, path.rsplit("/", 1)[1], data))
+        if path == "/api/training/refresh":
+            settings = user_settings(uid)
+            if not settings.get("handle"):
+                raise ValueError("请先在数据与账号中同步 CF 账号")
+            if get_sync_job(uid).get("status") != "running" and time.time() - settings.get("lastSync", 0) >= 30:
+                result = ADAPTERS["codeforces"].sync(settings["handle"])
+                save_records(uid, result["records"], result["scope"], result["profile"])
+            return self.send(TRAINING.state(uid))
         if path == "/api/logout":
             cookie = SimpleCookie(self.headers.get("Cookie", ""))
             with SESSION_LOCK:

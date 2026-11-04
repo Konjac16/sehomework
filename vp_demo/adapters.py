@@ -47,6 +47,7 @@ class PlatformAdapter(Protocol):
     def normalize(self, record: dict) -> dict: ...
     def sync(self, handle: str) -> dict: ...
     def fetch_statement(self, record: dict) -> dict: ...
+    def problem_catalog(self) -> list[dict]: ...
 
 
 class CodeforcesAdapter:
@@ -58,6 +59,23 @@ class CodeforcesAdapter:
 
     def fetch_statement(self, record):
         return fetch_cf_statement(record)
+
+    def problem_catalog(self):
+        data = self.call("problemset.problems")
+        problems = []
+        for p in data["problems"]:
+            cid, index, rating = p.get("contestId"), p.get("index"), p.get("rating")
+            if not isinstance(cid, int) or not isinstance(rating, int) or not re.fullmatch(r"[A-Za-z0-9]+", str(index or "")):
+                continue
+            if p.get("type", "PROGRAMMING") != "PROGRAMMING":
+                continue
+            problems.append(dict(platform=self.platform, externalId=f"{cid}{index}", problemKey=f"{cid}{index}",
+                contestId=cid, index=index, title=p.get("name", f"{cid}{index}"), rating=rating,
+                tags=sorted(set(p.get("tags") or [])),
+                url=f"https://codeforces.com/{'gym' if cid >= 100000 else 'contest'}/{cid}/problem/{index}"))
+        if not problems:
+            raise ValueError("CF 暂未返回有难度信息的题目，请稍后重试")
+        return problems
 
     def normalize(self, record):
         s = record.get("submission", record)

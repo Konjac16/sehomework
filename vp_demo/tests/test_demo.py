@@ -196,7 +196,7 @@ class HttpTests(unittest.TestCase):
     def test_boot_assets_and_exclusive_port(self):
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.assertEqual(self.request(client, '/api/health'), (200, {'app':'vplab','apiVersion':5}))
-        for path in ('/', '/source.js', '/app.js', '/review.js', '/review.css', '/statement.js', '/helper.js'):
+        for path in ('/', '/source.js', '/app.js', '/review.js', '/review.css', '/statement.js', '/helper.js', '/training.js', '/training.css'):
             status, body = self.request(client, path)
             self.assertEqual(status, 200)
             self.assertGreater(len(body), 100)
@@ -212,6 +212,34 @@ class HttpTests(unittest.TestCase):
         browser.assert_called_once_with(self.base)
         self.assertIn('already running', output.getvalue())
         self.assertTrue(server.running_vplab(self.http.server_port))
+
+    def test_training_routes_require_ac_and_isolate_users(self):
+        alice, bob = self.client('training_alice'), self.client('training_bob')
+        anonymous = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.assertEqual(self.request(anonymous, '/api/training')[0], 401)
+        self.assertEqual(self.request(anonymous, '/api/recommendations', {})[0], 401)
+        self.request(alice, '/api/import', {'text': json.dumps([record(index='Z')])})
+        p = {'platform':'codeforces','externalId':'1900A','problemKey':'1900A','title':'Example',
+             'rating':1800,'tags':['hidden-tag'],'url':'https://codeforces.com/contest/1900/problem/A'}
+        with patch.object(server.TRAINING, 'catalog', return_value=[p]):
+            status, state = self.request(alice, '/api/recommendations', {'mode':'daily'})
+            self.assertEqual(status, 200)
+            self.assertNotIn('hidden-tag', json.dumps(state))
+            self.assertEqual(state['referenceRating'], 1800)
+            state = self.request(alice, '/api/training/start', {'problemKey':'1900A'})[1]
+            run = state['active']
+            self.assertEqual(self.request(bob, '/api/training/skip', {'id':run['id']})[0], 400)
+            self.assertEqual(self.request(alice, '/api/training/feedback', {'id':run['id'],'completionMode':'independent'})[0], 400)
+            row = record(sid=999)
+            row['submission']['creationTimeSeconds'] = run['startedAt'] + 1
+            self.request(alice, '/api/import', {'text':json.dumps([row])})
+            self.assertEqual(self.request(alice, '/api/training/skip', {'id':run['id']})[0], 400)
+            self.assertEqual(self.request(alice, '/api/training/feedback', {'id':run['id']})[0], 400)
+            state = self.request(alice, '/api/training/feedback', {'id':run['id'],'completionMode':'hint'})[1]
+            self.assertEqual(state['history'][0]['status'], 'completed')
+            self.assertEqual(self.request(bob, '/api/training')[1]['history'], [])
+            self.assertIsNone(self.request(alice, '/api/recommendations', {})[1]['recommendation'])
+            self.assertEqual(self.request(alice, '/api/recommendations', {'mode':'focused'})[0], 400)
 
     def test_accounts_and_task_permissions(self):
         alice, bob = self.client("alice_test"), self.client("bob_test")
