@@ -1,7 +1,6 @@
 """Persistent reviews and personal lessons; all operations are scoped to a session user."""
 import hashlib
 import json
-import re
 import threading
 import time
 from ai_provider import DeepSeekProvider, ProviderError, PROMPT_VERSION, SCHEMA_VERSION
@@ -102,10 +101,11 @@ def validate_output(raw, snapshot):
         if not isinstance(item, dict) or str(item.get("before")) != expected["before"] or str(item.get("after")) != expected["after"]:
             raise ProviderError("模型返回的提交顺序与输入不一致。")
         refs = evidence(item.get("evidence", []))
-        steps.append(expected | {k: text_field(item.get(k, ""), "分析说明", 4000, True) for k in ("observation", "hypothesis", "test")} |
+        steps.append(expected | {k: text_field(item.get(k, ""), "分析说明", 4000, k != "test") for k in ("observation", "hypothesis", "test")} |
                      {"evidence": refs, "evidenceValid": bool(refs) and all(r["verified"] for r in refs), "testExecuted": False})
     candidates = raw.get("candidates", [])
-    if not isinstance(candidates, list) or len(candidates) > 3:
+    max_candidates = 1 if snapshot.get("workflow", {}).get("type") == "pure_ai_two_stage" else 3
+    if not isinstance(candidates, list) or len(candidates) > max_candidates:
         raise ProviderError("模型候选经验格式不正确。")
     clean = []
     for i, candidate in enumerate(candidates):
@@ -128,6 +128,7 @@ class ReviewService:
         self.lock = threading.RLock()
         self.keys = {}
         self.active = set()
+        self.stages = {}
 
     def recover(self):
         with self.connect() as c:
@@ -141,6 +142,8 @@ class ReviewService:
                 else:
                     self.keys[uid] = normalize_api_credential(data.get("apiKey", ""), "DeepSeek API Key")
             return {"configured": uid in self.keys, "provider": "DeepSeek", "model": self.provider.model,
+                    "generation": self.provider.generation_config(),
+                    "workflow": self.provider.workflow_config(),
                     "storage": "仅当前服务内存，退出登录或重启后需重新配置"}
 
     def get_card(self, uid, cid):
@@ -298,7 +301,9 @@ class ReviewService:
                     "records": available, "timeline": [{k: r[k] for k in ("externalId", "submittedAt", "verdict", "participantType")} |
                     {"hasSource": bool(r["source"])} for r in rows], "missingSourceIds": missing, "steps": steps,
                     "warnings": warnings, "question": question, "mode": mode, "relatedExperiences": related,
-                    "provider": self.provider.name, "model": self.provider.model, "promptVersion": PROMPT_VERSION, "schemaVersion": SCHEMA_VERSION}
+                    "provider": self.provider.name, "model": self.provider.model, "generation": self.provider.generation_config(),
+                    "workflow": self.provider.workflow_config(),
+                    "promptVersion": PROMPT_VERSION, "schemaVersion": SCHEMA_VERSION}
         size = sum(len(r["source"]) for r in available)+len(statement)+len(question)+len(dump(related))
         if size > 100000 or len(steps) > 20:
             blockers.append("所选范围超过当前单次 100000 字符 / 20 次修改上限，请改选两次提交；不会静默截断全过程。")
@@ -308,6 +313,7 @@ class ReviewService:
         return snapshot, {"fingerprint": fingerprint, "analysisScope": scope, "coverageState": coverage, "problem": snapshot["problem"],
                           "timeline": snapshot["timeline"], "steps": steps, "warnings": warnings, "blockers": blockers,
                           "requiresPartialConsent": scope == "first_ac" and coverage != "complete", "inputCharacters": size,
+                          "workflow": snapshot["workflow"],
                           "missingSourceIds": missing, "existingAnalysisId": row[0] if row else None}
 
     def analysis(self, uid, aid, snapshot=False):
@@ -320,6 +326,10 @@ class ReviewService:
                   "usage": json.loads(row["usage"]) if row["usage"] else None, "model": row["model"], "error": row["error"],
                   "createdAt": row["created_at"], "completedAt": row["completed_at"], "fingerprint": row["fingerprint"],
                   "context": {k: snap[k] for k in ("analysisScope", "coverageState", "problem", "timeline", "steps", "warnings", "missingSourceIds", "mode", "question", "relatedExperiences")}}
+        result["context"]["generation"] = snap.get("generation")
+        result["context"]["workflow"] = snap.get("workflow")
+        with self.lock:
+            result["stage"] = self.stages.get((uid, int(aid))) if row["status"] == "running" else None
         if snapshot:
             result["snapshot"] = snap
         return result
@@ -354,10 +364,17 @@ class ReviewService:
             return self.analysis(uid, aid), False
 
     def run_analysis(self, uid, aid, snapshot, key):
+        def on_stage(stage):
+            with self.lock:
+                if self.analysis(uid, aid)["status"] != "running":
+                    return False
+                self.stages[uid, aid] = stage
+                return True
+
         try:
             if self.analysis(uid, aid)["status"] != "running":
                 return
-            raw, usage, model = self.provider.analyze(snapshot, key)
+            raw, usage, model = self.provider.analyze(snapshot, key, on_stage=on_stage)
             result = validate_output(raw, snapshot)
             with self.connect() as c:
                 c.execute("UPDATE analyses SET status='succeeded',result=?,usage=?,model=?,completed_at=? WHERE id=? AND user_id=? AND status='running'",
@@ -372,6 +389,7 @@ class ReviewService:
             key = None
             with self.lock:
                 self.active.discard(uid)
+                self.stages.pop((uid, aid), None)
 
     def cancel(self, uid, aid):
         self.analysis(uid, aid)

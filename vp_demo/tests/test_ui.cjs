@@ -65,11 +65,19 @@ async function run(){
     let calls=[];api=async(path)=>{calls.push(path);if(path==='/api/ai/config')return {configured:true,model:'test'};
     if(path.startsWith('/api/experiences'))return {rows:[]};
     if(path==='/api/problem/statement')return {statement:{text:'',status:'unavailable',message:'HTTP 403'}};
-    if(path==='/api/analyses/preview')return {preview:{fingerprint:'abc',problem:{textOrigin:'missing'},timeline:[],warnings:[],blockers:[],coverageState:'pair',inputCharacters:10}};
+    if(path==='/api/analyses/preview')return {preview:{fingerprint:'abc',workflow:{type:'pure_ai_two_stage',callCount:2},problem:{textOrigin:'missing'},timeline:[],warnings:[],blockers:[],coverageState:'pair',inputCharacters:10}};
     throw new Error('Unexpected model request: '+path);};`, context);
   await vm.runInContext(`openReview('compare')`,context);
   vm.runInContext(`assert(!calls.includes('/api/analyses/create'));assert.equal(reviewUI.preview.fingerprint,'abc');`,context);
   assert(element('#review-side').innerHTML.includes('data-start-review'));
+  assert(element('#review-side').innerHTML.includes('自动完成两轮'));
+  vm.runInContext(`const savedWorkflow=reviewUI.preview.workflow;delete reviewUI.preview.workflow;drawReview();`,context);
+  assert(element('#review-side').innerHTML.includes('服务更新待生效'));
+  assert(/data-start-review\s+disabled/.test(element('#review-side').innerHTML));
+  vm.runInContext(`reviewUI.preview.workflow=savedWorkflow;drawReview();`,context);
+  vm.runInContext(`const running={id:8,status:'running',stage:'distill',context:{workflow:{type:'pure_ai_two_stage'}}};
+    assert(reviewResult(running).includes('第 2 / 2 轮'));
+    assert(reviewResult({...running,stage:'analyze'}).includes('第 1 / 2 轮'));`,context);
   vm.runInContext(`assert.equal(originalProblemUrl({problemKey:'1900A'}),'https://codeforces.com/contest/1900/problem/A');
     assert.equal(originalProblemUrl({problemKey:'100001A1'}),'https://codeforces.com/gym/100001/problem/A1');
     assert.equal(originalProblemUrl({problemKey:'javascript:alert(1)'}),'');
@@ -79,6 +87,12 @@ async function run(){
   vm.runInContext(`const unsafe={id:3,status:'succeeded',model:'test',completedAt:1,result:{summary:'<script>alert(1)</script>',steps:[],limitations:[],candidates:[{key:'0',title:'<img>',rule:'rule',tags:[],evidenceValid:false}]}};
     const html=reviewResult(unsafe);assert(html.includes('&lt;script&gt;'));assert(!html.includes('<script>'));
     assert(html.includes('data-candidate="0" disabled'));closeReview();assert.equal(reviewUI.open,false);`,context);
+  vm.runInContext(`const optional={...unsafe,context:{workflow:{type:'pure_ai_two_stage'}},usage:{complete:false},result:{...unsafe.result,
+    steps:[{before:'1',after:'2',adjacent:true,observation:'change',hypothesis:'reason',test:'',evidence:[]}],
+    candidates:[{...unsafe.result.candidates[0],incident:'<script>incident</script>',scenario:'<img>',checklist:['<svg>check</svg>']}]}};
+    const optionalHtml=reviewResult(optional);assert(!optionalHtml.includes('可选自检建议'));
+    assert(optionalHtml.includes('两轮用量未完整返回'));assert(optionalHtml.includes('&lt;svg&gt;'));
+    assert(!optionalHtml.includes('<script>'));`,context);
   // Saved results compare their immutable snapshots, even if live records changed.
   vm.runInContext(`sourceUI.comparison.savedAnalysisId=12;
     api=async(path)=>{calls.push(path);return {identical:true,removed:0,added:0,hunks:[],before:fixture,after:{...fixture,externalId:'2'}};};`,context);

@@ -1,4 +1,6 @@
 import io
+import hashlib
+import http.client
 import json
 import threading
 import time
@@ -9,7 +11,7 @@ from unittest.mock import patch
 import server
 import test_demo
 from ai_provider import DeepSeekProvider, ProviderError
-from review_service import validate_output
+from review_service import validate_output, dump
 
 
 def fake_output(snapshot, bad=False):
@@ -81,7 +83,7 @@ class ReviewHttpTests(unittest.TestCase):
         p = self.request(c,'/api/analyses/preview',data)[1]['preview']
         self.assertEqual(p['coverageState'],'complete')
         self.assertEqual(len(p['steps']),3)
-        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k:(fake_output(s),{'total_tokens':50},'mock-model')):
+        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k,**kw:(fake_output(s),{'total_tokens':50},'mock-model')):
             status, r = self.request(c,'/api/analyses/create',data|{'fingerprint':p['fingerprint']})
             self.assertEqual(status,202)
             a=self.finish(c,r['analysis']['id'])
@@ -101,7 +103,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_real_result_candidate_confirmation_versions_and_snapshot(self):
         c, other=self.prepare('review_save'),self.client('review_other')
-        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k:(fake_output(s),None,'mock')) as model:
+        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k,**kw:(fake_output(s),None,'mock')) as model:
             status,r=self.start(c);self.assertEqual(status,202)
             aid=r['analysis']['id'];a=self.finish(c,aid)
             self.assertEqual(a['status'],'succeeded')
@@ -136,16 +138,39 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_invalid_evidence_cannot_be_collected(self):
         c=self.prepare('review_badref')
-        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k:(fake_output(s,True),None,'mock')):
+        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k,**kw:(fake_output(s,True),None,'mock')):
             _,r=self.start(c);a=self.finish(c,r['analysis']['id'])
         self.assertEqual(a['status'],'succeeded')
         self.assertFalse(a['result']['candidates'][0]['evidenceValid'])
         self.assertEqual(self.request(c,'/api/experiences/from-analysis',{'analysisId':a['id'],'candidateKey':'0'})[0],422)
 
+    def test_generation_configuration_and_legacy_cache_isolation(self):
+        c=self.prepare('thinking_cache')
+        with patch.object(server.REVIEWS.provider,'analyze',side_effect=lambda s,k,**kw:(fake_output(s),None,'mock')):
+            _,r=self.start(c);a=self.finish(c,r['analysis']['id'])
+        self.assertEqual(a['context']['generation']['thinking'],{'type':'disabled'})
+        request={'analysisScope':'pair','beforeSubmissionId':'10','afterSubmissionId':'11'}
+        generation={'thinking':{'type':'enabled'},'reasoning_effort':'high','max_tokens':32768}
+        with patch.object(server.REVIEWS.provider,'generation_config',return_value=generation):
+            preview=self.request(c,'/api/analyses/preview',request)[1]['preview']
+        self.assertNotEqual(preview['fingerprint'],a['fingerprint'])
+        self.assertIsNone(preview['existingAnalysisId'])
+        # Simulate an older stored result, which predates generation metadata.
+        with server.connect() as db:
+            snapshot=json.loads(db.execute('SELECT snapshot FROM analyses WHERE id=?',(a['id'],)).fetchone()[0])
+            snapshot.pop('generation')
+            old=dump(snapshot)
+            db.execute('UPDATE analyses SET snapshot=?,fingerprint=? WHERE id=?',(old,hashlib.sha256(old.encode()).hexdigest(),a['id']))
+        legacy=self.request(c,'/api/analysis?id='+str(a['id']))[1]['analysis']
+        self.assertIsNone(legacy['context']['generation'])
+        self.assertEqual(legacy['status'],'succeeded')
+        preview=self.request(c,'/api/analyses/preview',request)[1]['preview']
+        self.assertIsNone(preview['existingAnalysisId'])
+
     def test_cancel_isolated_job_and_credentials_not_persisted(self):
         c=self.prepare('review_cancel')
         entered,release=threading.Event(),threading.Event()
-        def slow(snapshot,key):
+        def slow(snapshot,key,**kwargs):
             entered.set();release.wait(4);return fake_output(snapshot),None,'mock'
         with patch.object(server.REVIEWS.provider,'analyze',side_effect=slow):
             try:
@@ -176,19 +201,52 @@ class ReviewHttpTests(unittest.TestCase):
 class ProviderTests(unittest.TestCase):
     def test_json_request_and_error_redaction(self):
         snapshot={'records':[],'analysisScope':'pair','coverageState':'pair','warnings':[],'mode':'review','problem':{},'question':'','steps':[],'relatedExperiences':[]}
-        body={'choices':[{'finish_reason':'stop','message':{'content':'{"summary":"ok"}'}}],'model':'mock','usage':{'total_tokens':123}}
+        body={'choices':[{'finish_reason':'stop','message':{'content':'{"summary":"ok"}','reasoning_content':'internal reasoning'}}],'model':'mock','usage':{'total_tokens':123}}
         with patch('ai_provider.urllib.request.urlopen') as call:
             call.return_value.__enter__.return_value.read.return_value=json.dumps(body).encode()
             result,usage,model=DeepSeekProvider().analyze(snapshot,'fake-key')
         payload=json.loads(call.call_args.args[0].data)
         self.assertEqual(payload['response_format'],{'type':'json_object'})
         self.assertEqual(payload['thinking'],{'type':'disabled'})
+        self.assertNotIn('reasoning_effort',payload)
+        self.assertEqual(payload['max_tokens'],6000)
+        self.assertEqual(payload['temperature'],0.2)
+        self.assertEqual(call.call_args.kwargs['timeout'],90)
         self.assertNotIn('tools',payload)
-        self.assertEqual(usage['total_tokens'],123)
+        self.assertEqual(call.call_count,2)
+        self.assertEqual(usage['total_tokens'],246)
+        self.assertEqual(usage['callCount'],2)
+        first=json.loads(call.call_args_list[0].args[0].data)
+        self.assertEqual(first['max_tokens'],3000)
+        self.assertNotIn('response_format',first)
+        self.assertEqual(result,{'summary':'ok'})
         error=urllib.error.HTTPError('https://api.deepseek.com/chat/completions',401,'fake-key',{},io.BytesIO(b'fake-key'))
         with patch('ai_provider.urllib.request.urlopen',side_effect=error):
             with self.assertRaises(ProviderError) as caught:DeepSeekProvider().analyze(snapshot,'fake-key')
         self.assertNotIn('fake-key',str(caught.exception))
+
+    def test_exhausted_thinking_budget_does_not_accept_partial_result(self):
+        snapshot={'records':[],'analysisScope':'pair','coverageState':'pair','warnings':[],'mode':'review','problem':{},'question':'','steps':[],'relatedExperiences':[]}
+        body={'choices':[{'finish_reason':'length','message':{'reasoning_content':'unfinished','content':'{"summary":"partial"}'}}]}
+        with patch('ai_provider.urllib.request.urlopen') as call:
+            call.return_value.__enter__.return_value.read.return_value=json.dumps(body).encode()
+            with self.assertRaises(ProviderError) as caught:
+                DeepSeekProvider().analyze(snapshot,'fake-key')
+            self.assertIn('length',str(caught.exception))
+
+    def test_transport_errors_preserve_kind_without_sensitive_details(self):
+        snapshot={'records':[],'analysisScope':'pair','coverageState':'pair','warnings':[],'mode':'review','problem':{},'question':'','steps':[],'relatedExperiences':[]}
+        cases=[(TimeoutError('fake-key'),'TimeoutError'),
+               (urllib.error.URLError(OSError('fake-key')),'OSError'),
+               (http.client.IncompleteRead(b'fake-key',20),'IncompleteRead'),
+               (json.JSONDecodeError('fake-key','fake-key',0),'JSON'),
+               (RuntimeError('fake-key'),'RuntimeError')]
+        for error,kind in cases:
+            with self.subTest(kind=kind),patch('ai_provider.urllib.request.urlopen',side_effect=error):
+                with self.assertRaises(ProviderError) as caught:
+                    DeepSeekProvider().analyze(snapshot,'fake-key')
+                self.assertIn(kind,str(caught.exception))
+                self.assertNotIn('fake-key',str(caught.exception))
 
     def test_incomplete_steps_are_rejected(self):
         with self.assertRaises(ProviderError):
