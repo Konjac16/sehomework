@@ -14,6 +14,7 @@ const context = vm.createContext({console,URLSearchParams,setTimeout,clearTimeou
   location:{search:'',origin:'http://127.0.0.1:8765'}, window:{scrollTo(){},addEventListener(){}},
   document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}}});
 vm.runInContext(readFileSync(join(__dirname,'../static/helper.js'),'utf8'),context);
+vm.runInContext(readFileSync(join(__dirname,'../static/statement-format.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/statement.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/review.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/source.js'),'utf8'),context);

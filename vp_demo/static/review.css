@@ -7,3 +7,14 @@
 .problem-statement-panel{margin:16px 0;padding:16px;background:#f3f7ee;border:1px solid #d4e2c8;border-radius:10px}.problem-statement-panel .panel-head{margin-bottom:8px}.problem-statement-panel summary{cursor:pointer;color:#3d6748}.statement-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;padding:16px;background:#fff;color:#24332b;font:13px/1.8 system-ui,sans-serif}.statement-content .help{margin:8px 0}
 
 .helper-controls{padding:12px 0}.helper-controls button{margin:0 8px 6px 0}#helper-install{width:min(680px,95vw)}.helper-steps{padding-left:22px;line-height:1.9}.helper-steps li{margin:12px 0}
+
+.statement-document{margin-top:14px;padding:22px;background:#fff;border-radius:10px;color:#25352d;max-height:70vh;overflow:auto;font:15px/1.85 system-ui,sans-serif;overflow-wrap:anywhere}
+.statement-document .statement-title{margin:0 0 14px;font-size:20px;line-height:1.5;font-weight:650}
+.statement-facts{display:flex;flex-wrap:wrap;gap:8px 24px;margin:0 0 22px;padding-bottom:14px;border-bottom:1px solid #e6ebdf;font-size:12px}
+.statement-facts>div{display:flex;gap:8px}.statement-facts dt{color:#71816a}.statement-facts dd{margin:0;color:#344832}
+.statement-document p{margin:0 0 16px;white-space:pre-wrap}.statement-document .katex{font-size:1.08em;white-space:normal}
+.statement-document .katex-display{overflow-x:auto;overflow-y:hidden;padding:5px 0;max-width:100%}
+.statement-document .statement-section-title{margin:22px 0 10px;font-size:16px;color:#375c40}
+.statement-document pre.statement-sample{margin:8px 0 18px;padding:14px 18px;background:#f5f7f2;border:1px solid #dfe6d7;border-radius:7px;white-space:pre;color:#24332b;max-height:none;font:13px/1.7 Consolas,monospace;overflow:auto}
+.statement-sample code{font:inherit;color:inherit}.statement-math-fallback{font:13px Consolas,monospace;background:#fff4dc;padding:2px 4px;white-space:pre-wrap}
+.statement-render-note{color:#82682b;font-size:12px}@media(max-width:720px){.statement-document{padding:16px;font-size:14px}.statement-facts{gap:6px 14px}}

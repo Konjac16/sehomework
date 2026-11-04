@@ -231,6 +231,15 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/api/health":
             return self.send({"app": "vplab", "apiVersion": 5})
+        if path.startswith('/vendor/katex/'):
+            name = path.removeprefix('/vendor/katex/')
+            if name not in ('katex.min.js', 'katex.min.css') and not re.fullmatch(r'fonts/[A-Za-z0-9_-]+\.(woff2|woff|ttf)', name):
+                return self.send({'error': '不存在的资源'}, 404)
+            file = ROOT / 'static' / 'vendor' / 'katex' / name
+            if not file.is_file():
+                return self.send({'error': '不存在的资源'}, 404)
+            mime = {'.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf'}[file.suffix]
+            return self.send(file.read_bytes(), content_type=mime)
         if path == '/browser-helper.zip':
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -238,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                     if file.suffix in ('.js', '.json', '.txt'):
                         z.write(file, 'VP-Lab-Browser-Helper/' + file.name)
             return self.send(buf.getvalue(), content_type='application/zip', extra={'Content-Disposition': 'attachment; filename="VP-Lab-Browser-Helper.zip"'})
-        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/helper.js", "/style.css", "/review.css"):
+        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/statement-format.js", "/helper.js", "/style.css", "/review.css"):
             name = "index.html" if path == "/" else path[1:]
             mime = "text/html" if path == "/" else "text/javascript" if path.endswith(".js") else "text/css"
             return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
