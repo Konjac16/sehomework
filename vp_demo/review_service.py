@@ -85,8 +85,9 @@ def validate_output(raw, snapshot):
             start, end, quote = item.get("lineStart"), item.get("lineEnd"), item.get("quote")
             valid = sid in records and type(start) is int and type(end) is int and isinstance(quote, str) and 0 < len(quote) <= 5000
             if valid:
-                lines = records[sid]["source"].split("\n")
-                valid = 1 <= start <= end <= len(lines) and end-start < 80 and "\n".join(lines[start-1:end]).strip() == quote.strip()
+                lines = records[sid]["source"].replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                quoted = quote.replace("\r\n", "\n").replace("\r", "\n")
+                valid = 1 <= start <= end <= len(lines) and end-start < 80 and "\n".join(lines[start-1:end]).strip() == quoted.strip()
             checked.append({"submissionId": sid[:80], "lineStart": start if type(start) is int else 0,
                             "lineEnd": end if type(end) is int else 0, "quote": quote[:5000] if isinstance(quote, str) else "",
                             "verified": bool(valid)})
