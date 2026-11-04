@@ -5,3 +5,5 @@
 .saved-review .review-scope,.saved-review .review-inputs{display:none}
 
 .problem-statement-panel{margin:16px 0;padding:16px;background:#f3f7ee;border:1px solid #d4e2c8;border-radius:10px}.problem-statement-panel .panel-head{margin-bottom:8px}.problem-statement-panel summary{cursor:pointer;color:#3d6748}.statement-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;padding:16px;background:#fff;color:#24332b;font:13px/1.8 system-ui,sans-serif}.statement-content .help{margin:8px 0}
+
+.helper-controls{padding:12px 0}.helper-controls button{margin:0 8px 6px 0}#helper-install{width:min(680px,95vw)}.helper-steps{padding-left:22px;line-height:1.9}.helper-steps li{margin:12px 0}

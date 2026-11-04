@@ -25,6 +25,7 @@ from domain import summarize, predict, prioritize
 from code_diff import compare_sources
 from review_service import ReviewService, ReviewError, init_tables
 from problem_statement import StatementService
+from browser_bridge import BrowserBridge
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
@@ -176,7 +177,8 @@ def save_records(uid, records, scope, profile=None):
 
 
 STATEMENTS = StatementService(connect, ADAPTERS)
-REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings, STATEMENTS.cached)
+REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings, STATEMENTS.cached_for)
+BRIDGE = BrowserBridge(STATEMENTS)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -192,6 +194,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(blob)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if urlparse(self.path).path == '/api/browser/result' and re.fullmatch(r'chrome-extension://[a-p]{32}', self.headers.get('Origin', '')):
+            self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
+            self.send_header('Vary', 'Origin')
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
         for key, value in (extra or {}).items():
             self.send_header(key, value)
@@ -225,8 +230,15 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/health":
-            return self.send({"app": "vplab", "apiVersion": 4})
-        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/style.css", "/review.css"):
+            return self.send({"app": "vplab", "apiVersion": 5})
+        if path == '/browser-helper.zip':
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+                for file in sorted((ROOT / 'browser_helper').iterdir()):
+                    if file.suffix in ('.js', '.json', '.txt'):
+                        z.write(file, 'VP-Lab-Browser-Helper/' + file.name)
+            return self.send(buf.getvalue(), content_type='application/zip', extra={'Content-Disposition': 'attachment; filename="VP-Lab-Browser-Helper.zip"'})
+        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/helper.js", "/style.css", "/review.css"):
             name = "index.html" if path == "/" else path[1:]
             mime = "text/html" if path == "/" else "text/javascript" if path.endswith(".js") else "text/css"
             return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
@@ -240,6 +252,8 @@ class Handler(BaseHTTPRequestHandler):
         if not uid:
             return self.send({"error": "请先登录"}, 401)
         q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        if path == '/api/browser/status':
+            return self.send({'job': BRIDGE.status(uid, q.get('id', ''))})
         if path == "/api/ai/config":
             return self.send(REVIEWS.config(uid))
         if path == "/api/experiences":
@@ -350,6 +364,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(buf.getvalue(), content_type="application/zip", extra={"Content-Disposition": 'attachment; filename="vplab-export.zip"'})
         self.send({"error": "不存在的地址"}, 404)
 
+    def do_OPTIONS(self):
+        if urlparse(self.path).path != '/api/browser/result' or not re.fullmatch(r'chrome-extension://[a-p]{32}', self.headers.get('Origin', '')):
+            return self.send({'error': '请求来源不匹配'}, 403)
+        return self.send({}, extra={'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type, X-VPLab-Token', 'Access-Control-Allow-Private-Network': 'true'})
+
     def do_POST(self):
         origin = self.headers.get("Origin")
         try:
@@ -359,7 +378,11 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length)
             # Drain the bounded body before replying; closing with unread bytes can
             # reset the connection on Windows and hide the useful 403 response.
-            if origin and origin != "http://" + self.headers.get("Host", ""):
+            bridge_result = urlparse(self.path).path == '/api/browser/result'
+            if bridge_result and length > 1_200_000:
+                return self.send({'error': '题面过大'}, 413)
+            extension_origin = bridge_result and re.fullmatch(r'chrome-extension://[a-p]{32}', origin or '')
+            if origin and origin != "http://" + self.headers.get("Host", "") and not extension_origin:
                 return self.send({"error": "请求来源不匹配"}, 403)
             data = json.loads(body or b"{}")
             if not isinstance(data, dict):
@@ -373,6 +396,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send({"error": "操作失败，已有数据已保留"}, 500)
 
     def post_route(self, path, data):
+        if path == '/api/browser/result':
+            return self.send({'job': BRIDGE.deliver(self.headers.get('X-VPLab-Token', ''), data)})
         if path in ("/api/register", "/api/login"):
             username = str(data.get("username", "")).strip()
             password = str(data.get("password", ""))
@@ -402,14 +427,20 @@ class Handler(BaseHTTPRequestHandler):
             with SESSION_LOCK:
                 SESSIONS.pop(cookie["vplab_session"].value, None)
             REVIEWS.config(uid, {"clear": True})
+            BRIDGE.cancel_user(uid)
             return self.send({"ok": True}, extra={"Set-Cookie": "vplab_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
         if path == "/api/ai/config":
             return self.send(REVIEWS.config(uid, data))
-        if path == "/api/problem/statement":
+        if path in ("/api/problem/statement", '/api/browser/create'):
             platform = data.get("platform", "codeforces")
             record = next((r for r in user_records(uid) if r["platform"] == platform and r["problemKey"] == data.get("problemKey")), None)
             if record is None:
                 raise ReviewError("题目不存在或不属于当前训练记录。", 404)
+            if path == '/api/browser/create':
+                return self.send({'job': BRIDGE.create(uid, {k: record[k] for k in ('platform', 'problemKey', 'contestId', 'index')})})
+            cached = STATEMENTS.cached_for(uid, record)
+            if cached and cached.get('textOrigin') == 'codeforces_browser':
+                return self.send({'statement': cached | {'cached': True}})
             return self.send({"statement": STATEMENTS.get(record, data.get("refresh") is True)})
         if path == "/api/analyses/preview":
             _, preview = REVIEWS.preview(uid, data)
@@ -549,7 +580,7 @@ def running_vplab(port):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=3) as response:
             health = json.loads(response.read(4096))
-        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 4
+        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 5
     except Exception:
         return False
 

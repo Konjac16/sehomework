@@ -35,6 +35,23 @@
 
 ## 原题链接与自动题面
 
+### 浏览器获取（Chrome / Edge）
+
+当直接获取返回 403 时，在源码或对比页点击“浏览器获取题面”。首次需要加载本项目提供的扩展：
+
+1. 在“数据与账号 → 浏览器题面助手”打开安装说明并下载 ZIP、解压；也可直接使用项目内 `browser_helper` 文件夹。
+2. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`，开启开发者模式，选择“加载已解压的扩展程序”，选中含 `manifest.json` 的文件夹。
+3. 在同一浏览器刷新 VP Lab，检查连接，然后点击代码旁的“浏览器获取题面”。
+4. 助手打开指定 CF 原题。若出现验证，请手动完成；题面出现后自动回传。CF 页面显示成功提示，VP Lab 自动更新题面与尚未开始的分析预览。
+
+扩展不要求 CF 密码、Cookie 或源码权限，不自动提交代码；只处理由 VP Lab 主动创建、绑定到特定标签页的题面任务。短期回传令牌保存在扩展会话存储，十分钟到期，任务结果和页面不显示令牌；退出本地账号后撤销任务。服务重启后需重新登录并重新发起。关闭原题标签页会将未完成任务标为失败。Chrome/Edge 如果提示本地网络访问，请允许助手连接正在运行的本地 VP Lab。
+
+MathJax 的原始 TeX 优先提取并去除重复渲染，样例按行保留；找不到公式原文时注明限制。图片仍仅提示，不进行图像识别。浏览器题面缓存按本地账号隔离，不进入其他用户的缓存，AI 快照来源标为 `codeforces_browser`。扩展仅支持 `codeforces.com` 的 contest/gym 题页；其他域名、PDF 题面以及其他 OJ 尚未接入。
+
+下载包由 `GET /browser-helper.zip` 从扩展源文件生成。安装后需要保留文件夹；代码更新后在扩展管理页面点击重新加载，并刷新 VP Lab。扩展与后台的逻辑、权限边界和 HTTP 回传已有自动化测试；当前环境没有可用的浏览器控制通道，真实扩展安装、CF 验证和采集成功流程仍需在浏览器验收。
+
+### 直接获取与缓存
+
 源码查看、代码对比和 AI 侧栏均提供原题链接。打开当前记录的源码或对比页时，自动读取 CF 公开题面；代码立即显示，不等待题面。提取题意、约束、输入输出、样例和备注，保留 LaTeX 原文与样例换行。展示纯文本，不执行原站 HTML；题面包含图片时明确提示，当前不下载图片或进行视觉识别。
 
 公开题面按平台和题号缓存在 SQLite；成功缓存默认使用 7 天，可主动刷新，同题刷新至少间隔 60 秒。失败缓存 60 秒，全局串行访问且间隔至少 2.1 秒，网络超时 18 秒；刷新失败保留已有文字。接口只允许获取当前用户已有记录的题目，URL 由适配器生成，不接受任意网址，不携带 CF 凭证。后续平台可实现 `PlatformAdapter.fetch_statement(record)`。
@@ -72,6 +89,8 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 - `review_service.py`：分析范围、快照、任务与证据验证、经验库和版本控制。
 - `ai_provider.py`：模型供应商边界，结构化请求和错误处理，不执行源码。
 - `problem_statement.py`：题面 HTML 提取、固定原站地址、缓存与限流。
+- `browser_bridge.py`：按账号和题目绑定的短期浏览器采集任务与回传校验。
+- `browser_helper/`：Chrome / Edge Manifest V3 扩展源码，无第三方运行依赖。
 - `static/`：无构建依赖的响应式前端。
 
 业务接口：`/api/dashboard`、`/api/problem`、`/api/import`、`/api/sync`、`/api/predict`、`/api/tasks/create`、`/api/tasks/update`、`/api/settings`、`/api/export`。
@@ -87,6 +106,9 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 | GET `/api/submission?id=&platform=codeforces` | 读取一次提交及源码 |
 | GET `/api/diff?before=&after=&full=0` | 同题两次提交的逐行和行内差异；full=1 显示完整上下文 |
 | POST `/api/problem/statement` | `platform,problemKey,refresh`；获取或读取公开题面缓存，返回 `statement.status/text/url/textOrigin/fetchedAt/message`；失败状态为 unavailable，有旧内容时为 stale |
+| POST `/api/browser/create` | 登录用户按 `platform,problemKey` 发起浏览器采集，返回十分钟任务和短期回传令牌 |
+| GET `/api/browser/status?id=` | 当前账号的采集进度，不返回令牌 |
+| POST `/api/browser/result` | 扩展通过 `X-VPLab-Token` 回传指定任务的题面 HTML；验证题目网址、大小、有效题面和任务状态后保存 |
 | GET / POST `/api/ai/config` | 查询配置状态；`apiKey` 配置内存密钥，`clear:true` 清除。不返回密钥 |
 | POST `/api/analyses/preview` | `analysisScope:pair/first_ac`、题号或两次提交 ID、可选题面/问题/经验 ID；返回指纹、范围和阻断原因，不调用模型 |
 | POST `/api/analyses/create` | 同预览参数，加 `fingerprint`；片段需 `allowPartial:true`；新任务 202，已有结果复用 200 |
@@ -104,5 +126,7 @@ Key / Secret 只进入当前 HTTP 请求和同步线程内存，不写数据库�
 ## 验证
 
 运行 `python -m unittest discover -s tests -v` 和 `node tests/test_ui.cjs`。测试使用临时数据库，不会修改实际用户记录。在线 API 使用模拟响应验证签名、分页、失败保留和中止，不表示已经用真实凭证完成线上验证。AI 测试模拟供应商响应，覆盖首次 AC 截止、缺失源码、任务取消、结果复用、证据拒绝、快照不可变、账号隔离、经验确认和版本冲突；不代表真实模型分析质量已验收。前端测试检查模板与异步交互逻辑，不替代浏览器视觉验收。
+
+运行 `node tests/test_helper.cjs` 验证扩展的标签页任务绑定、回传地址、令牌隔离、关闭清理，以及公式/样例提取逻辑。这里使用 Chrome API 与 DOM 模拟对象，不会驱动真实浏览器。
 
 现有导出器作为外部数据输入，本项目没有复制第三方开源仓库代码；平台适配思想参考之前调研的 icpc-workbench，所有界面和实现为本次新建。

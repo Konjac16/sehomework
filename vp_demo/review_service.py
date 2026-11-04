@@ -122,7 +122,7 @@ def validate_output(raw, snapshot):
 class ReviewService:
     def __init__(self, connect, db_lock, records, settings, statement=None):
         self.connect, self.db_lock, self.records, self.settings = connect, db_lock, records, settings
-        self.statement = statement or (lambda record: None)
+        self.statement = statement or (lambda uid, record: None)
         self.provider = DeepSeekProvider()
         self.lock = threading.RLock()
         self.keys = {}
@@ -270,7 +270,7 @@ class ReviewService:
         statement = text_field(data.get("problemText", ""), "题面", 40000)
         statement_info = {"url": rows[0]["url"], "textOrigin": "user" if statement else "missing"}
         if not statement:
-            cached = self.statement(rows[0])
+            cached = self.statement(uid, rows[0])
             if cached and cached.get("text"):
                 statement = cached["text"]
                 statement_info.update({k: cached[k] for k in ("url", "textOrigin", "fetchedAt") if k in cached})

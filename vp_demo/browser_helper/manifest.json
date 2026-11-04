@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "VP Lab 题面助手",
+  "version": "1.0.0",
+  "minimum_chrome_version": "102",
+  "description": "从你在 VP Lab 中指定的 CF 原题页面读取题面并回传本地训练空间。",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "background.js"},
+  "content_scripts": [
+    {"matches": ["http://127.0.0.1/*"], "js": ["local.js"], "run_at": "document_idle"},
+    {"matches": ["https://codeforces.com/contest/*/problem/*", "https://codeforces.com/gym/*/problem/*"], "js": ["extract.js", "capture.js"], "run_at": "document_idle"}
+  ]
+}

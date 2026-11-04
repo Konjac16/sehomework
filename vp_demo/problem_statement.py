@@ -108,6 +108,21 @@ class StatementService:
         c.execute('''CREATE TABLE IF NOT EXISTS problem_statements(
           platform TEXT NOT NULL, problem_key TEXT NOT NULL, payload TEXT NOT NULL,
           PRIMARY KEY(platform,problem_key))''')
+        c.execute('''CREATE TABLE IF NOT EXISTS browser_statements(
+          user_id INTEGER NOT NULL REFERENCES users(id), platform TEXT NOT NULL,
+          problem_key TEXT NOT NULL, payload TEXT NOT NULL,
+          PRIMARY KEY(user_id,platform,problem_key))''')
+
+    def cached_for(self, uid, record):
+        with self.connect() as c:
+            row = c.execute('SELECT payload FROM browser_statements WHERE user_id=? AND platform=? AND problem_key=?',
+                            (uid, record['platform'], record['problemKey'])).fetchone()
+        return json.loads(row[0]) if row else self.cached(record)
+
+    def save_browser(self, uid, record, result):
+        with self.connect() as c:
+            c.execute('INSERT OR REPLACE INTO browser_statements(user_id,platform,problem_key,payload) VALUES(?,?,?,?)',
+                      (uid, record['platform'], record['problemKey'], json.dumps(result, ensure_ascii=False)))
 
     def cached(self, record):
         with self.connect() as c:

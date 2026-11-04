@@ -11,8 +11,9 @@ function element(key) {
   return elements.get(key);
 }
 const context = vm.createContext({console,URLSearchParams,setTimeout,clearTimeout,assert,
-  location:{search:''}, window:{scrollTo(){}},
+  location:{search:'',origin:'http://127.0.0.1:8765'}, window:{scrollTo(){},addEventListener(){}},
   document:{querySelector:element,querySelectorAll:()=>[],addEventListener(type,fn){(listeners[type]??=[]).push(fn);}}});
+vm.runInContext(readFileSync(join(__dirname,'../static/helper.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/statement.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/review.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/source.js'),'utf8'),context);
@@ -44,7 +45,7 @@ async function run(){
   await vm.runInContext(`openComparison('1900A','1')`,context);
   vm.runInContext(`assert.equal(sourceUI.comparison.before,'');resetSourceUI();assert.equal(sourceUI.comparison,null);assert.equal(state.detail.length,0);`,context);
   assert.equal(element('#detail').open,false);
-  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:4}:{user:null};`,context);
+  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:5}:{user:null};`,context);
   await vm.runInContext('startApplication()',context);
   assert.equal(element('#boot-status').hidden,true);
   assert.equal(element('#auth').hidden,false);
