@@ -1,0 +1,13 @@
+{
+  "mode": "replay",
+  "contestId": 1985,
+  "description": "双人合成回放：两名选手通过不同的题；最后一条提交恰在截止时刻，不计入榜单。",
+  "events": [
+    {"eventId": 1, "slot": 1, "elapsedSeconds": 300, "index": "A", "verdict": "WRONG_ANSWER"},
+    {"eventId": 2, "slot": 1, "elapsedSeconds": 600, "index": "A", "verdict": "COMPILATION_ERROR"},
+    {"eventId": 3, "slot": 1, "elapsedSeconds": 1200, "index": "A", "verdict": "OK"},
+    {"eventId": 4, "slot": 2, "elapsedSeconds": 1800, "index": "D", "verdict": "OK"},
+    {"eventId": 5, "slot": 1, "elapsedSeconds": 2400, "index": "C", "verdict": "WRONG_ANSWER"},
+    {"eventId": 6, "slot": 2, "elapsedSeconds": 9000, "index": "A", "verdict": "OK"}
+  ]
+}

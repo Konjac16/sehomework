@@ -1,10 +1,13 @@
 import json
+import os
+import sqlite3
+import time
 import unittest
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import server
 import test_demo
-from problem_statement import StatementParser, fetch_cf_statement, problem_url
+from problem_statement import StatementParser, StatementService, fetch_cf_statement, problem_url
 
 
 HTML = '''<html><div>Unrelated navigation</div><div class="problem-statement">
@@ -46,6 +49,69 @@ class ParserTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'403'): fetch_cf_statement(r)
 
 
+class ArchiveFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(':memory:')
+        self.addCleanup(self.db.close)
+        StatementService.init_tables(self.db)
+        self.adapter = Mock()
+        self.service = StatementService(lambda: self.db, {'codeforces': self.adapter})
+        self.record = {'platform':'codeforces', 'problemKey':'105588G', 'contestId':105588, 'index':'G'}
+        self.payload = {'text':'Previously fetched full statement', 'status':'ready', 'message':'',
+                        'textOrigin':'codeforces', 'checkedAt':int(time.time()),
+                        'url':problem_url(self.record), 'warnings':['Keep this warning']}
+        env = patch.dict(os.environ, {'VPLAB_CF_ARCHIVE':'fixture-archive'})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def save_public(self, payload):
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO problem_statements VALUES(?,?,?)',
+                            ('codeforces', '105588G', json.dumps(payload)))
+
+    def test_archive_miss_keeps_cache_for_view_refresh_and_analysis(self):
+        self.save_public(self.payload)
+        with patch('problem_statement.archived_statement', side_effect=ValueError('Archive missing problem')):
+            self.assertEqual(self.service.cached_for(1, self.record), self.payload)
+            for refresh in (False, True):
+                result = self.service.get(self.record, refresh=refresh)
+                self.assertEqual(result, self.payload | {'cached':True})
+        self.adapter.fetch_statement.assert_not_called()
+
+    def test_failed_refresh_keeps_old_text_origin_and_warnings(self):
+        self.save_public(self.payload | {'checkedAt':0})
+        self.adapter.fetch_statement.side_effect = ValueError('Archive missing problem')
+        with patch('problem_statement.archived_statement', side_effect=ValueError('Archive missing problem')):
+            result = self.service.get(self.record, refresh=True)
+            self.assertEqual(result['status'], 'stale')
+            for field in ('text', 'textOrigin', 'warnings', 'url'):
+                self.assertEqual(result[field], self.payload[field])
+            self.assertEqual(self.service.cached_for(1, self.record)['text'], self.payload['text'])
+        self.adapter.fetch_statement.assert_called_once_with(self.record)
+
+    def test_archive_precedes_public_cache_and_browser_cache_stays_private(self):
+        self.save_public(self.payload)
+        archived = self.payload | {'text':'Offline statement', 'textOrigin':'cf_archive'}
+        browser = self.payload | {'text':'Browser statement', 'textOrigin':'codeforces_browser'}
+        self.service.save_browser(1, self.record, browser)
+        with patch('problem_statement.archived_statement', return_value=archived):
+            self.assertEqual(self.service.cached_for(1, self.record), browser)
+            self.assertEqual(self.service.cached_for(2, self.record)['text'], 'Offline statement')
+        with patch('problem_statement.archived_statement', side_effect=ValueError('Archive missing problem')):
+            self.assertEqual(self.service.cached_for(1, self.record), browser)
+            self.assertEqual(self.service.cached_for(2, self.record), self.payload)
+
+    def test_missing_both_sources_reports_missing_without_network(self):
+        for saved in (None, self.payload | {'text':'', 'status':'unavailable'}):
+            if saved is not None:
+                self.save_public(saved)
+            with patch('problem_statement.archived_statement', side_effect=ValueError('Archive missing problem')):
+                result = self.service.get(self.record)
+                self.assertEqual((result['status'], result['text']), ('unavailable', ''))
+                self.assertEqual(result['message'], 'Archive missing problem')
+        self.adapter.fetch_statement.assert_not_called()
+
+
 class StatementHttpTests(unittest.TestCase):
     client = test_demo.HttpTests.client
     request = test_demo.HttpTests.request
@@ -75,6 +141,11 @@ class StatementHttpTests(unittest.TestCase):
         self.assertEqual(preview['problem']['textOrigin'],'codeforces')
         self.assertIn('An integer n.',preview['problem']['text'])
         self.assertTrue(any('图片' in w for w in preview['warnings']))
+        with patch.dict(os.environ, {'VPLAB_CF_ARCHIVE':'fixture-archive'}), \
+                patch('problem_statement.archived_statement', side_effect=ValueError('Archive missing problem')):
+            fallback = self.request(c,'/api/analyses/preview',data)[1]['preview']
+            self.assertEqual(fallback['problem']['text'], preview['problem']['text'])
+            self.assertEqual(fallback['fingerprint'], preview['fingerprint'])
         custom=self.request(c,'/api/analyses/preview',data|{'problemText':'My corrected statement'})[1]['preview']
         self.assertEqual(custom['problem']['textOrigin'],'user')
         self.assertNotEqual(preview['fingerprint'],custom['fingerprint'])

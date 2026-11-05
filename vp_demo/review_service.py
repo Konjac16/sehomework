@@ -277,7 +277,7 @@ class ReviewService:
             cached = self.statement(uid, rows[0])
             if cached and cached.get("text"):
                 statement = cached["text"]
-                statement_info.update({k: cached[k] for k in ("url", "textOrigin", "fetchedAt") if k in cached})
+                statement_info.update({k: cached[k] for k in ("url", "textOrigin", "fetchedAt", "archiveProvider") if k in cached})
                 warnings.extend(cached.get("warnings", []))
                 if cached.get("status") == "stale":
                     warnings.append("题面刷新失败，使用之前保存的题面版本。")

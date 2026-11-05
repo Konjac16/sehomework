@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "verifiedAt": "2026-11-05T11:10:00+00:00",
+  "contests": 1996,
+  "slots": 12538,
+  "samplePairs": 23880,
+  "idsSha256": "669b7e9e11238a2cc48f6cc675a9fbbed30d50385c8e68c3622ce56341b923f7",
+  "catalogSha256": "1f085a5b6d29adf1d4945633b7aa1b1df83a0757f5955e2fa17b65a7653378dd",
+  "sourceSqliteSha256": "53398fe3bc17307eb1e0628592fe9453ba21cfcf90cb0c2c93a149c8cb505ea5"
+}

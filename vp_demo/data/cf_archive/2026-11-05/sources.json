@@ -1,0 +1,23 @@
+{
+  "contests": {
+    "url": "https://codeforces.com/api/contest.list?gym=false",
+    "fetchedAt": "2026-11-05T08:02:13Z",
+    "file": "contests.json.gz",
+    "sha256Decoded": "d61b76feb248ce40d61a052801020f9860f07be31ae01b4807d1f7da23fc8cd9",
+    "bytesDecoded": 412815,
+    "counts": {
+      "contests": 2167
+    }
+  },
+  "problemset": {
+    "url": "https://codeforces.com/api/problemset.problems",
+    "fetchedAt": "2026-11-05T08:02:16Z",
+    "file": "problemset.json.gz",
+    "sha256Decoded": "6a5e83b0c44d8f8d2126f72f1234fe888038b8dc476e2900b0ec0218cec4b037",
+    "bytesDecoded": 2283490,
+    "counts": {
+      "problems": 11495,
+      "problemStatistics": 11495
+    }
+  }
+}

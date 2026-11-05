@@ -61,7 +61,7 @@ async function run(){
   await vm.runInContext(`openComparison('1900A','1')`,context);
   vm.runInContext(`assert.equal(sourceUI.comparison.before,'');resetSourceUI();assert.equal(sourceUI.comparison,null);assert.equal(state.detail.length,0);`,context);
   assert.equal(element('#detail').open,false);
-  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:5}:{user:null};`,context);
+  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:9}:{user:null};`,context);
   await vm.runInContext('startApplication()',context);
   assert.equal(element('#boot-status').hidden,true);
   assert.equal(element('#auth').hidden,false);
@@ -118,6 +118,14 @@ async function run(){
   vm.runInContext(`let finishRequest;api=()=>new Promise(resolve=>finishRequest=resolve);let pendingRequest=reviewApi('/api/experience?id=1');resetReviewUI();finishRequest({card:{title:'private'}});`,context);
   await assert.rejects(vm.runInContext('pendingRequest',context),/账号已切换/);
   vm.runInContext(`assert.equal(libraryUI.selected,null);assert.equal(reviewUI.config,null);`,context);
+  // The merged login flow must invalidate in-flight daily-training requests as well.
+  vm.runInContext(`trainingUI.data={private:true};trainingUI.busy=true;
+    const beforeLogout=trainingUI.seq;showAuth();
+    assert.equal(trainingUI.data,null);assert.equal(trainingUI.busy,false);
+    assert.equal(trainingUI.seq,beforeLogout+1);assert.equal(state.user,null);`,context);
+  const navigation=readFileSync(join(__dirname,'../static/index.html'),'utf8');
+  assert(navigation.includes('id="open-duo"'));
+  assert(navigation.includes('data-tab="training"'));
   console.log('UI checks passed: source/diff views, AI preview without model calls, escaped results, snapshot comparison, logout isolation.');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

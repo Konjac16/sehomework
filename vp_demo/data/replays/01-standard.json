@@ -1,0 +1,47 @@
+{
+  "mode": "replay",
+  "events": [
+    {
+      "eventId": 1,
+      "slot": 1,
+      "index": "A",
+      "elapsedSeconds": 300,
+      "verdict": "WRONG_ANSWER"
+    },
+    {
+      "eventId": 2,
+      "slot": 1,
+      "index": "A",
+      "elapsedSeconds": 600,
+      "verdict": "COMPILATION_ERROR"
+    },
+    {
+      "eventId": 3,
+      "slot": 1,
+      "index": "A",
+      "elapsedSeconds": 1200,
+      "verdict": "OK"
+    },
+    {
+      "eventId": 4,
+      "slot": 1,
+      "index": "B",
+      "elapsedSeconds": 1350,
+      "verdict": "WRONG_ANSWER"
+    },
+    {
+      "eventId": 5,
+      "slot": 2,
+      "index": "A",
+      "elapsedSeconds": 1800,
+      "verdict": "OK"
+    },
+    {
+      "eventId": 6,
+      "slot": 2,
+      "index": "B",
+      "elapsedSeconds": 7200,
+      "verdict": "OK"
+    }
+  ]
+}
