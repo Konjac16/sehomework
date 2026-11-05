@@ -46,7 +46,7 @@ async function run(){
   await vm.runInContext(`openComparison('1900A','1')`,context);
   vm.runInContext(`assert.equal(sourceUI.comparison.before,'');resetSourceUI();assert.equal(sourceUI.comparison,null);assert.equal(state.detail.length,0);`,context);
   assert.equal(element('#detail').open,false);
-  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:5}:{user:null};`,context);
+  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:9}:{user:null};`,context);
   await vm.runInContext('startApplication()',context);
   assert.equal(element('#boot-status').hidden,true);
   assert.equal(element('#auth').hidden,false);

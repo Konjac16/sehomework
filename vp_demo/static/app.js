@@ -26,7 +26,27 @@ function rating(v) { return v == null ? '<span class="badge gray">未评级</spa
 function heading(kicker,title,description,action='') {return `<div class="page-heading"><div><span class="eyebrow">${kicker}</span><h1>${title}</h1><p>${description}</p></div>${action}</div>`;}
 function empty(title,description,button='') {return `<div class="empty"><b>${title}</b>${description}${button?`<div>${button}</div>`:''}</div>`;}
 function dataNotice(){return state.data.onlyAccepted?'<div class="notice"><strong>当前数据仅包含 AC 提交。</strong> 以下展示已完成题目的积累；不据此计算真实通过率、失败次数或判定弱项。</div>':'<div class="notice neutral">统计仅覆盖已导入或同步的记录，不代表完整历史。不同题型可能重叠；自由练习与比赛表现尚未分开建模。</div>';}
-function showAuth(){resetHelper();resetReviewUI();resetSourceUI();state.user=null;state.data=null;state.prediction=null;$('#auth').hidden=false;$('#shell').hidden=true;}
+function renderAuthMode(){
+  const route=new URLSearchParams(location.search);
+  const inRoomFlow=route.get('next')==='duo';
+  const creating=state.registering;
+  $('#auth').classList.toggle('duo-entry',inRoomFlow);
+  $('#auth-title').textContent=inRoomFlow?(creating?'创建 VP 账号':'登录 VP 账号'):(creating?'开始你的训练档案':'欢迎回来');
+  let description=creating?'注册本地账号，数据保存在这台电脑上。':'登录后继续查看你的记录和训练计划。';
+  if(inRoomFlow){
+    description=route.has('join')?'登录后继续接受队友的邀请。':route.has('room')?'登录后回到这间训练房。':'使用本地账号创建房间或加入队友。';
+  }
+  $('#auth-description').textContent=description;
+  $('#auth-submit').textContent=inRoomFlow?(creating?'注册并继续':'登录并继续'):(creating?'注册并开始 ↗':'登录工作台 ↗');
+  $('#auth-toggle').textContent=creating?'已有账号？登录':'还没有账号？注册';
+  $('#auth-form input[name=password]').autocomplete=creating?'new-password':'current-password';
+  $('#auth-error').textContent='';
+}
+function showAuth(){
+  resetHelper();resetReviewUI();resetSourceUI();state.user=null;state.data=null;state.prediction=null;
+  try{state.registering=localStorage.getItem('vp-has-account')!=='1';}catch{state.registering=true;}
+  renderAuthMode();$('#auth').hidden=false;$('#shell').hidden=true;
+}
 async function load(){
   const generation=sourceUI.generation;
   const data=await api('/api/dashboard');
@@ -40,6 +60,16 @@ async function enter(){
   const me=await api('/api/me');
   if(!me.user){showAuth();return;}
   state.user=me.user;$('#auth').hidden=true;$('#shell').hidden=false;
+  const route = new URLSearchParams(location.search);
+  if(route.get('next')==='duo'){
+    const join = route.get('join') || '', roomId = route.get('room') || '';
+    let target = '/duo';
+    if (/^[a-f0-9]{10}$/i.test(join)) target += '?join=' + join.toUpperCase();
+    else if (/^[a-f0-9]{20}$/.test(roomId)) target += '?room=' + roomId;
+    location.replace(target);
+    return;
+  }
+  if(new URLSearchParams(location.search).get('tab')==='tasks')state.tab='tasks';
   $('#username').textContent=me.user.username;$('#avatar').textContent=me.user.username[0].toUpperCase();
   await load();
   const sid=new URLSearchParams(location.search).get('submission');
@@ -108,7 +138,11 @@ function taskDialog(task=null, seed={}){closeReview();const s=task||seed;const e
 async function submitHandler(event){
  event.preventDefault();const form=event.target,button=form.querySelector('button[type=submit],button.primary');if(!button)return;const original=button.innerHTML;button.disabled=true;button.textContent='处理中…';
  try {const f=new FormData(form);
- if(form.id==='auth-form'){await api(state.registering?'/api/register':'/api/login',{username:f.get('username'),password:f.get('password')});form.reset();await enter();}
+ if(form.id==='auth-form'){
+  await api(state.registering?'/api/register':'/api/login',{username:f.get('username'),password:f.get('password')});
+  try{localStorage.setItem('vp-has-account','1');}catch{}
+  form.reset();await enter();
+ }
  if(form.id==='import-form'){const file=f.get('file');if(file.size>24*1024*1024)throw new Error('文件大于 24 MB');const r=await api('/api/import',{text:await file.text()});await load();toast(`导入完成：收到 ${r.received} 条，新增 ${r.added} 条`);}
  if(form.id==='sync-form'){const r=await api('/api/sync',{handle:f.get('handle')});await load();toast(`同步成功：新增 ${r.added} 条记录`);}
  if(form.id==='settings-form'){await api('/api/settings',{referenceRating:f.get('referenceRating')===''?null:Number(f.get('referenceRating')),focusTags:f.getAll('focus')});await load();toast('训练偏好已保存');}
@@ -123,7 +157,8 @@ document.addEventListener('click',async event=>{
  const b=event.target.closest('button');if(!b || b.disabled)return;
  try{
  if(b.dataset.tab){navigate(b.dataset.tab);return;}
- if(b.id==='auth-toggle'){state.registering=!state.registering;$('#auth-title').textContent=state.registering?'开始你的训练档案':'欢迎回来';$('#auth-description').textContent=state.registering?'注册本地账号，数据保存在这台电脑上。':'登录后继续查看你的记录和训练计划。';$('#auth-submit').textContent=state.registering?'注册并开始 ↗':'登录工作台 ↗';b.textContent=state.registering?'已有账号？登录':'还没有账号？注册';$('#auth-error').textContent='';$('#auth-form input[name=password]').autocomplete=state.registering?'new-password':'current-password';}
+ if(b.id==='open-duo'){location.assign('/duo');return;}
+ if(b.id==='auth-toggle'){state.registering=!state.registering;renderAuthMode();}
  if(b.id==='logout'){await api('/api/logout',{});state.data=null;state.prediction=null;state.tab='overview';showAuth();}
  if(b.id==='import-sample'){b.disabled=true;b.textContent='正在导入…';try{const r=await api('/api/import-sample',{});await load();toast(`已导入 ${r.received} 条记录，新增 ${r.added} 条`);}finally{b.disabled=false;b.textContent='导入这份本地样本 →';}}
  if(b.dataset.detail)await detail(b.dataset.detail);
@@ -148,7 +183,7 @@ async function startApplication(){
   try{
     if(typeof resetSourceUI!=='function'||typeof resetReviewUI!=='function'||typeof ensureStatement!=='function'||typeof resetHelper!=='function')throw new Error('新版源码模块未加载。请关闭旧版 VP Lab 服务，再重新运行 StartDemo.cmd 并刷新页面。');
     const health=await api('/api/health');
-    if(health.app!=='vplab'||health.apiVersion!==5)throw new Error('页面与服务版本不匹配，请重启 VP Lab 服务。');
+    if(health.app!=='vplab'||health.apiVersion!==9)throw new Error('页面与服务版本不匹配，请重启 VP Lab 服务。');
     await enter();
     $('#boot-status').hidden=true;
   }catch(error){showStartupError(error);}

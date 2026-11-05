@@ -1,0 +1,101 @@
+{
+  "schemaVersion": "1.0",
+  "mode": "real_snapshot",
+  "source": "Codeforces 官方比赛页（人工核对元数据）",
+  "checkedOn": "2026-11-05",
+  "durationSource": "https://codeforces.com/contests/page/22",
+  "contests": [
+    {
+      "contestId": 1,
+      "name": "Codeforces Beta Round 1",
+      "durationSeconds": 7200,
+      "phase": "FINISHED",
+      "problemSetComplete": true,
+      "problemKeys": [
+        "cf:1:A",
+        "cf:1:B",
+        "cf:1:C"
+      ],
+      "sourceUrl": "https://codeforces.com/contest/1"
+    },
+    {
+      "contestId": 4,
+      "name": "Codeforces Beta Round 4 (Div. 2 Only)",
+      "durationSeconds": 7200,
+      "phase": "FINISHED",
+      "problemSetComplete": true,
+      "problemKeys": [
+        "cf:4:A",
+        "cf:4:B",
+        "cf:4:C",
+        "cf:4:D"
+      ],
+      "sourceUrl": "https://codeforces.com/contest/4"
+    }
+  ],
+  "problems": [
+    {
+      "problemKey": "cf:1:A",
+      "contestId": 1,
+      "index": "A",
+      "name": "Theatre Square",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/1/problem/A"
+    },
+    {
+      "problemKey": "cf:1:B",
+      "contestId": 1,
+      "index": "B",
+      "name": "Spreadsheet",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/1/problem/B"
+    },
+    {
+      "problemKey": "cf:1:C",
+      "contestId": 1,
+      "index": "C",
+      "name": "Ancient Berland Circus",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/1/problem/C"
+    },
+    {
+      "problemKey": "cf:4:A",
+      "contestId": 4,
+      "index": "A",
+      "name": "Watermelon",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/4/problem/A"
+    },
+    {
+      "problemKey": "cf:4:B",
+      "contestId": 4,
+      "index": "B",
+      "name": "Before an Exam",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/4/problem/B"
+    },
+    {
+      "problemKey": "cf:4:C",
+      "contestId": 4,
+      "index": "C",
+      "name": "Registration System",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/4/problem/C"
+    },
+    {
+      "problemKey": "cf:4:D",
+      "contestId": 4,
+      "index": "D",
+      "name": "Mysterious Present",
+      "rating": null,
+      "tags": [],
+      "url": "https://codeforces.com/contest/4/problem/D"
+    }
+  ]
+}

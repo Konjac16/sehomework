@@ -44,8 +44,9 @@ class DomainTests(unittest.TestCase):
     def test_running_server_must_identify_as_compatible_vplab(self):
         with patch('server.urllib.request.build_opener') as build:
             response = build.return_value.open.return_value.__enter__.return_value
-            for payload, expected in (({'app':'vplab','apiVersion':5}, True),
-                                      ({'app':'other','apiVersion':5}, False),
+            for payload, expected in (({'app':'vplab','apiVersion':9}, True),
+                                      ({'app':'vplab','apiVersion':8}, False),
+                                      ({'app':'other','apiVersion':7}, False),
                                       ({'app':'vplab','apiVersion':1}, False), ([], False)):
                 response.read.return_value = json.dumps(payload).encode()
                 self.assertEqual(server.running_vplab(8765), expected)
@@ -195,7 +196,7 @@ class HttpTests(unittest.TestCase):
 
     def test_boot_assets_and_exclusive_port(self):
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        self.assertEqual(self.request(client, '/api/health'), (200, {'app':'vplab','apiVersion':5}))
+        self.assertEqual(self.request(client, '/api/health'), (200, {'app':'vplab','apiVersion':9}))
         for path in ('/', '/source.js', '/app.js', '/review.js', '/review.css', '/statement.js', '/helper.js'):
             status, body = self.request(client, path)
             self.assertEqual(status, 200)

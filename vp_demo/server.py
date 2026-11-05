@@ -26,8 +26,11 @@ from code_diff import compare_sources
 from review_service import ReviewService, ReviewError, init_tables
 from problem_statement import StatementService
 from browser_bridge import BrowserBridge
+from duo_rooms import DuoRooms
+from duo_rules import RoomError
 
 ROOT = Path(__file__).resolve().parent
+API_VERSION = 9
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
 SAMPLE = Path(os.environ.get("VPLAB_SAMPLE", "E:/codeforces_submissions.jsonl"))
 SESSIONS = {}
@@ -138,6 +141,7 @@ def init_db():
         ''')
         init_tables(c)
         StatementService.init_tables(c)
+        DuoRooms.init_tables(c)
 
 
 def user_settings(uid):
@@ -179,10 +183,14 @@ def save_records(uid, records, scope, profile=None):
 STATEMENTS = StatementService(connect, ADAPTERS)
 REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings, STATEMENTS.cached_for)
 BRIDGE = BrowserBridge(STATEMENTS)
+_pool = ROOT / "data" / "vp-ready.zip"
+ROOMS = DuoRooms(connect, DB_LOCK, ADAPTERS["codeforces"],
+                 Path(os.environ.get("VPLAB_CONTESTS", _pool if _pool.is_file() else ROOT / "data" / "contests.json")))
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "VPLab/0.3"
+    protocol_version = "HTTP/1.1"  # Reuse connections for the two simultaneous workstations.
 
     def log_message(self, format, *args):
         pass  # No credentials, submitted code, or import bodies in request logs.
@@ -219,6 +227,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             self.get_route()
+        except RoomError as exc:
+            self.send({"error": str(exc)}, exc.status)
         except ReviewError as exc:
             self.send({"error": str(exc)}, exc.status)
         except (ValueError, TypeError, KeyError):
@@ -229,8 +239,16 @@ class Handler(BaseHTTPRequestHandler):
     def get_route(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
+            return
         if path == "/api/health":
-            return self.send({"app": "vplab", "apiVersion": 5})
+            return self.send({"app": "vplab", "apiVersion": API_VERSION})
+        if path in ("/duo", "/duo.js", "/duo.css"):
+            name, mime = {"/duo": ("duo.html", "text/html"), "/duo.js": ("duo.js", "text/javascript"),
+                          "/duo.css": ("duo.css", "text/css")}[path]
+            return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
         if path.startswith('/vendor/katex/'):
             name = path.removeprefix('/vendor/katex/')
             if name not in ('katex.min.js', 'katex.min.css') and not re.fullmatch(r'fonts/[A-Za-z0-9_-]+\.(woff2|woff|ttf)', name):
@@ -261,6 +279,8 @@ class Handler(BaseHTTPRequestHandler):
         if not uid:
             return self.send({"error": "请先登录"}, 401)
         q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        if path == "/api/rooms" or path.startswith("/api/rooms/"):
+            return self.send(ROOMS.handle("GET", path, uid, query=q))
         if path == '/api/browser/status':
             return self.send({'job': BRIDGE.status(uid, q.get('id', ''))})
         if path == "/api/ai/config":
@@ -397,6 +417,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError("请求格式错误")
             self.post_route(urlparse(self.path).path, data)
+        except RoomError as exc:
+            self.send({"error": str(exc)}, exc.status)
         except ReviewError as exc:
             self.send({"error": str(exc)}, exc.status)
         except (ValueError, TypeError, KeyError) as exc:
@@ -438,6 +460,9 @@ class Handler(BaseHTTPRequestHandler):
             REVIEWS.config(uid, {"clear": True})
             BRIDGE.cancel_user(uid)
             return self.send({"ok": True}, extra={"Set-Cookie": "vplab_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+        if path == "/api/rooms" or path.startswith("/api/rooms/"):
+            q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+            return self.send(ROOMS.handle("POST", path, uid, data, query=q))
         if path == "/api/ai/config":
             return self.send(REVIEWS.config(uid, data))
         if path in ("/api/problem/statement", '/api/browser/create'):
@@ -448,7 +473,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/browser/create':
                 return self.send({'job': BRIDGE.create(uid, {k: record[k] for k in ('platform', 'problemKey', 'contestId', 'index')})})
             cached = STATEMENTS.cached_for(uid, record)
-            if cached and cached.get('textOrigin') == 'codeforces_browser':
+            if cached and cached.get('textOrigin') in ('codeforces_browser', 'cf_archive'):
                 return self.send({'statement': cached | {'cached': True}})
             return self.send({"statement": STATEMENTS.get(record, data.get("refresh") is True)})
         if path == "/api/analyses/preview":
@@ -576,6 +601,7 @@ class Handler(BaseHTTPRequestHandler):
 class LocalServer(ThreadingHTTPServer):
     # Windows permits two ordinary listeners to bind the same port unless exclusive.
     allow_reuse_address = False
+    request_queue_size = 64
 
     def server_bind(self):
         if os.name == "nt":
@@ -589,7 +615,7 @@ def running_vplab(port):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=3) as response:
             health = json.loads(response.read(4096))
-        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == 5
+        return isinstance(health, dict) and health.get("app") == "vplab" and health.get("apiVersion") == API_VERSION
     except Exception:
         return False
 
@@ -598,13 +624,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--browser", action="store_true")
+    parser.add_argument("--duo", action="store_true", help="open the 1-3 player room lobby")
     args = parser.parse_args()
     init_db()
     try:
         server = LocalServer(("127.0.0.1", args.port), Handler)
     except OSError as exc:
         if running_vplab(args.port):
-            url = f"http://127.0.0.1:{args.port}"
+            url = f"http://127.0.0.1:{args.port}" + ("/duo" if args.duo else "")
             print(f"VP Lab is already running: {url}", flush=True)
             if args.browser:
                 webbrowser.open(url)
@@ -613,10 +640,11 @@ def main():
         print("Close the previous VP Lab server window and run StartDemo.cmd again.", flush=True)
         print("Or run: python server.py --port 8766 --browser", flush=True)
         raise SystemExit(1)
+    args.port = server.server_port
     REVIEWS.recover()
     print(f"VP Lab: http://127.0.0.1:{args.port}", flush=True)
     if args.browser:
-        threading.Timer(0.7, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
+        threading.Timer(0.7, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}" + ("/duo" if args.duo else ""))).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
