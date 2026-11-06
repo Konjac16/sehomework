@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import io
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -243,6 +244,12 @@ class Handler(BaseHTTPRequestHandler):
     def get_route(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        ui_root = (ROOT / "static" / "ui").resolve()
+        if (ui_root / "index.html").is_file() and not path.startswith("/api/"):
+            candidate = (ui_root / ("index.html" if path == "/" else path.lstrip("/"))).resolve()
+            if candidate.is_relative_to(ui_root) and candidate.is_file():
+                mime = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+                return self.send(candidate.read_bytes(), content_type=mime)
         if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()

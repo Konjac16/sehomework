@@ -1,0 +1,55 @@
+'use strict';
+const trainingUI = {data:null, busy:false, seq:0, timer:null, error:''};
+function resetTraining(){clearTimeout(trainingUI.timer);trainingUI.seq++;trainingUI.data=null;trainingUI.busy=false;trainingUI.error='';}
+function trainingView(){return heading('ONE PROBLEM AT A TIME','日常练习','根据难度范围推荐题目，完成后记录反馈。')+
+ `<div id="training-error" role="status"></div><div class="training-grid"><section id="training-content" aria-live="polite"><div class="panel">正在准备训练空间…</div></section><aside class="panel training-options" id="training-options"></aside></div><section class="panel" id="training-history"></section>`;}
+function trainingReference(d){return `<b>参考水平如何变化</b><p class="help">每 3 道已反馈的训练题评估一次，最多调整 100。CF Rating 变化后以最新值为准。当前进度 ${d.feedbackWindow} / 3。</p>${d.assessment.at?`<p class="help">最近一次评估：${d.assessment.delta>0?'+':''}${d.assessment.delta}，参考水平 ${d.assessment.reference}。</p>`:''}`;}
+function trainingSettings(d){const p=d.preferences;return `<h3>选择训练难度</h3><p class="help" id="training-reference-summary">训练参考水平 <b>${d.referenceRating}</b> · CF Rating ${d.cfRating??'暂无'}</p>
+ <form id="training-settings"><div class="training-radios"><label><input type="radio" name="difficultyMode" value="default" ${p.difficultyMode==='default'?'checked':''}>默认</label><label><input type="radio" name="difficultyMode" value="manual" ${p.difficultyMode==='manual'?'checked':''}>人工</label></div>
+ <label>参考档位<select name="intensity">${[['easy','轻松'],['normal','正常'],['challenge','挑战']].map(([v,n])=>{const offsets={easy:[-600,-200],normal:[-200,200],challenge:[200,600]}[v];return `<option value="${v}" ${p.intensity===v?'selected':''}>${n} · ${d.referenceRating+offsets[0]}～${d.referenceRating+offsets[1]}</option>`;}).join('')}</select></label>
+ <div class="field-row"><label>人工下限<input type="number" name="minRating" min="0" max="5000" required value="${p.minRating}"></label><label>人工上限<input type="number" name="maxRating" min="0" max="5000" required value="${p.maxRating}"></label></div>
+ <label class="inline-check"><input type="checkbox" name="includeAttempted" ${p.includeAttempted?'checked':''}>包含以前尝试过但未通过的题</label><p class="help">默认区间跟随参考水平；人工区间保持固定。已 AC 的题不再推荐。</p><button class="secondary wide" type="submit">应用设置</button></form>
+ <div class="training-reference">${trainingReference(d)}</div>`;}
+function trainingProblem(p){return `<span class="eyebrow">CODEFORCES · ${e(p.problemKey)}</span><h2>${e(p.title)}</h2><div class="training-facts">${rating(p.rating)}<span>题目 Rating</span></div>`;}
+function trainingReason(){return `<label class="training-reason">换题原因（可跳过）<select id="training-reason"><option value="">不填写</option><option value="too_hard">太难</option><option value="too_easy">太简单</option><option value="already_done">做过了</option><option value="not_now">暂时不想做</option></select></label>`;}
+function trainingFeedback(r){return `<article class="training-feedback"><div class="panel-head"><b>${e(r.problem.problemKey)} · ${e(r.problem.title)}</b><span class="badge">AC · 待反馈</span></div><p class="help">已核对 CF 提交 #${e(r.acId)}。请选择完成方式，提交后才完成本次训练。</p><form id="training-feedback-${r.id}" data-run="${r.id}"><div class="training-feedback-options">${[['independent','独立完成','没有针对本题的提示、题解或 AI 解题帮助'],['hint','参考提示后完成','参考了提示或讨论，关键推导与实现由自己完成'],['editorial','参考题解后完成','阅读了解法、关键实现或 AI 提供的完整解法']].map(([v,n,h])=>`<label><input type="radio" name="completionMode" value="${v}" required><span><b>${n}</b><small>${h}</small></span></label>`).join('')}</div><button class="primary" type="submit">提交反馈</button><a class="text-button" href="${e(r.problem.url)}" target="_blank" rel="noopener">查看原题 ↗</a></form></article>`;}
+function drawTraining(replaceSettings=false){const d=trainingUI.data;if(!d||state.tab!=='training')return;
+ const drafts=[...window.vpDocument.querySelectorAll('.training-feedback input:checked')].map(input=>[input.form.id,input.value]);
+ const previousReason=$('#training-reason')?.value;
+ const active=d.active,p=d.recommendation;
+ $('#training-error').innerHTML=trainingUI.error?`<div class="notice">${e(trainingUI.error)} <button class="text-button" data-training="refresh">重试同步</button></div>`:'';
+ $('#training-content').innerHTML=`<div class="panel training-current"><div class="panel-head"><span class="eyebrow">${active?'训练进行中':'推荐题目'}</span><span class="pill-info">${d.range[0]}～${d.range[1]}</span></div>${active?`${trainingProblem(active.problem)}<p class="section-description">已经开始。前往 CF 作答并提交，检测到 AC 后填写完成反馈。</p><div class="form-actions"><a class="primary" href="${e(active.problem.url)}" target="_blank" rel="noopener">继续做题 ↗</a><button class="secondary" data-training="refresh">刷新提交状态</button></div>${trainingReason()}<button class="text-button" data-training="skip" data-id="${active.id}">跳过，保留到尝试过的题目 →</button>`:
+ d.pending.length?'<h2>完成之后，留下一个反馈。</h2><p class="section-description">填写下方完成方式后，为你推荐下一道题。</p>':p?`${trainingProblem(p)}<p class="section-description">按你选择的难度范围推荐，兼顾长期覆盖与近期训练。</p><div class="form-actions"><button class="primary" data-training="start" ${!d.handle?'disabled':''}>开始训练 ↗</button><a class="text-button" href="${e(p.url)}" target="_blank" rel="noopener">查看原题</a></div>${trainingReason()}<button class="text-button" data-training="dismiss">换一道 →</button>`:'<div class="empty"><b>当前条件下暂无可推荐题目</b></div>'}
+ ${!d.handle?'<div class="notice neutral">请先同步 CF 账号，才能开始训练并核对 AC。<button class="text-button" data-tab="settings">前往数据与账号 →</button></div>':''}
+ <div class="training-sync"><span>提交同步：${stamp(d.lastSync)}</span><button class="text-button" data-training="refresh" ${!d.handle?'disabled':''}>同步 CF</button></div><p class="help">${e(d.historyScope)}。排除已做题和核对 AC 的范围取决于已同步记录。训练页每分钟尝试同步一次；不运行 AI 分析。</p>${d.catalogUpdatedAt?`<p class="help">题库缓存：${stamp(d.catalogUpdatedAt)}</p>`:''}</div>${d.pending.map(trainingFeedback).join('')}`;
+ for(const [formId,value] of drafts){const input=$(`#${formId} input[value="${value}"]`);if(input)input.checked=true;}
+ if(!replaceSettings&&previousReason&&$('#training-reason'))$('#training-reason').value=previousReason;
+ const options=$('#training-options');if(replaceSettings||!options.innerHTML){options.innerHTML=trainingSettings(d);trainingSettingControls();}
+ else{const summary=$('#training-reference-summary');if(summary)summary.innerHTML=`训练参考水平 <b>${d.referenceRating}</b> · CF Rating ${d.cfRating??'暂无'}`;const progress=$('.training-reference');if(progress)progress.innerHTML=trainingReference(d);const select=$('#training-settings select[name=intensity]');if(select)for(const option of select.options){const [lo,hi]={easy:[-600,-200],normal:[-200,200],challenge:[200,600]}[option.value];option.textContent=`${{easy:'轻松',normal:'正常',challenge:'挑战'}[option.value]} · ${d.referenceRating+lo}～${d.referenceRating+hi}`;}}
+ const status={active:'训练中',skipped:'已跳过',pending_feedback:'AC · 待反馈',completed:'已完成'};
+ const modes={independent:'独立完成',hint:'参考提示',editorial:'参考题解'};
+ $('#training-history').innerHTML=`<div class="panel-head"><div><h3>尝试过的题目</h3><p>开始过的训练会保留在这里，跳过后也可以回来继续。</p></div><span>${d.history.length} 道</span></div>${d.history.length?`<div class="table-wrap"><table><thead><tr><th>题目</th><th>难度</th><th>状态</th><th>开始时间</th><th></th></tr></thead><tbody>${d.history.map(r=>`<tr><td><a href="${e(r.problem.url)}" target="_blank" rel="noopener">${e(r.problem.problemKey)} · ${e(r.problem.title)}</a></td><td>${rating(r.problem.rating)}</td><td><span class="badge ${r.status==='skipped'?'gray':''}">${status[r.status]}</span>${r.feedback?`<div class="help">${modes[r.feedback]}</div>`:''}</td><td>${stamp(r.startedAt)}</td><td>${r.status==='skipped'?`<button class="text-button" data-training="resume" data-id="${r.id}" ${d.active||d.pending.length?'disabled':''}>继续训练 →</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:empty('还没有开始过训练','推荐和浏览不会产生未完成记录。')}`;
+}
+function trainingSettingControls(){const f=$('#training-settings');if(!f)return;const manual=f.elements.difficultyMode.value==='manual';f.elements.minRating.disabled=!manual;f.elements.maxRating.disabled=!manual;f.elements.minRating.closest('.field-row').hidden=!manual;f.elements.intensity.disabled=manual;}
+function scheduleTraining(){clearTimeout(trainingUI.timer);if(!trainingUI.data?.handle||!trainingUI.data.history.some(r=>['active','skipped'].includes(r.status)))return;trainingUI.timer=setTimeout(()=>{if(state.tab==='training'&&state.user&&!window.vpDocument.hidden&&!trainingUI.busy)trainingRequest('/api/training/refresh',{},false);else if(state.tab==='training'&&state.user)scheduleTraining();},60000);}
+async function trainingRequest(path,data,replaceSettings=true){if(trainingUI.busy)return;const seq=++trainingUI.seq;trainingUI.busy=true;clearTimeout(trainingUI.timer);
+ window.vpDocument.querySelectorAll('[data-training],#training-settings button,.training-feedback button').forEach(b=>b.disabled=true);
+ try{let result=await api(path,data);if(seq!==trainingUI.seq||!state.user)return;trainingUI.data=result;
+   if(!result.active&&!result.pending.length&&!result.recommendation)result=await api('/api/recommendations',{mode:'daily',platforms:['codeforces']});
+   if(seq!==trainingUI.seq||!state.user)return;trainingUI.data=result;trainingUI.error='';drawTraining(replaceSettings);
+ }catch(error){if(seq!==trainingUI.seq||!state.user)return;trainingUI.error=error.message;if(trainingUI.data)drawTraining(false);else if(state.tab==='training')$('#training-content').innerHTML=`<div class="panel"><p class="error">${e(error.message)}</p><button class="secondary" data-training="reload">重试</button></div>`;}
+ finally{if(seq===trainingUI.seq){trainingUI.busy=false;const save=$('#training-settings button');if(save)save.disabled=false;scheduleTraining();}}
+}
+function loadTraining(){resetTraining();trainingRequest('/api/training');}
+window.vpDocument.addEventListener('change',event=>{if(event.target.closest('#training-settings'))trainingSettingControls();});
+window.vpDocument.addEventListener('click',event=>{const b=event.target.closest('[data-training]');if(!b||b.disabled||trainingUI.busy)return;const action=b.dataset.training,d=trainingUI.data;
+ if(action==='reload'){loadTraining();return;}
+ if(action==='refresh'){trainingRequest('/api/training/refresh',{});return;}
+ const payload={id:Number(b.dataset.id||0),problemKey:d.recommendation?.problemKey,platform:d.recommendation?.platform,reason:$('#training-reason')?.value||''};
+ trainingRequest('/api/training/'+action,payload);
+});
+window.vpDocument.addEventListener('submit',event=>{const form=event.target;if(!form.id.startsWith('training-'))return;event.preventDefault();if(trainingUI.busy)return;
+ const f=new FormData(form);
+ if(form.id==='training-settings'){const old=trainingUI.data.preferences;trainingRequest('/api/training/preferences',{difficultyMode:f.get('difficultyMode'),intensity:f.get('intensity')||old.intensity,minRating:f.has('minRating')?Number(f.get('minRating')):old.minRating,maxRating:f.has('maxRating')?Number(f.get('maxRating')):old.maxRating,includeAttempted:f.get('includeAttempted')==='on'});}
+ else trainingRequest('/api/training/feedback',{id:Number(form.dataset.run),completionMode:f.get('completionMode')});
+});

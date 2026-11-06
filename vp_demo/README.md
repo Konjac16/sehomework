@@ -4,6 +4,8 @@
 
 面向算法竞赛的训练工作台，当前 v0.3 支持在线获取 CF 提交与源码、提交修改对比、代码旁 AI 复盘、个人经验库、画像、概率估算与补题流程。后端使用 Python 3.10 及以上版本与标准库；前端内置 KaTeX 公式渲染资源，无需在线 CDN。
 
+前端采用 Vben Admin 的 Vue / Ant Design Vue 布局，已包含构建产物。开发与重新构建见 [前端说明](frontend/VPLAB.md)。
+
 ## 启动
 
 双击 `StartDemo.cmd`，或在此目录运行 `python server.py --browser`。访问 http://127.0.0.1:8765 。关闭启动终端即可停止服务；端口被占用时使用 `python server.py --port 8766 --browser`。

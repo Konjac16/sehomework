@@ -1,0 +1,1 @@
+var e=`更新密碼`,t=`更新基本資訊`,n={updatePassword:e,updateBasicProfile:t};export{n as default,t as updateBasicProfile,e as updatePassword};
