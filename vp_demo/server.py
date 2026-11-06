@@ -29,9 +29,10 @@ from browser_bridge import BrowserBridge
 from training_service import TrainingService
 from duo_rooms import DuoRooms
 from duo_rules import RoomError
+from duo_sync import RoomAutoSync
 
 ROOT = Path(__file__).resolve().parent
-API_VERSION = 9
+API_VERSION = 10
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
 SAMPLE = Path(os.environ.get("VPLAB_SAMPLE", "E:/codeforces_submissions.jsonl"))
 SESSIONS = {}
@@ -662,6 +663,8 @@ def main():
         raise SystemExit(1)
     args.port = server.server_port
     REVIEWS.recover()
+    room_sync = RoomAutoSync(ROOMS)
+    room_sync.start()
     print(f"VP Lab: http://127.0.0.1:{args.port}", flush=True)
     if args.browser:
         threading.Timer(0.7, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}" + ("/duo" if args.duo else ""))).start()
@@ -670,6 +673,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        room_sync.stop()
         server.server_close()
 
 

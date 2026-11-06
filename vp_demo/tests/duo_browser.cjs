@@ -15,11 +15,12 @@ let child, browser;
 async function boot(){
  const env={...process.env,VPLAB_DB:db,PYTHONDONTWRITEBYTECODE:'1'};
  if(fullCatalog){
+  env.VP_ROOM_TEST_TOKEN=require('node:crypto').randomBytes(24).toString('hex');
   if(process.env.VP_TEST_CATALOG)env.VPLAB_CONTESTS=path.resolve(process.env.VP_TEST_CATALOG);
   else delete env.VPLAB_CONTESTS;
   delete env.VPLAB_CF_ARCHIVE;
  }else env.VPLAB_CONTESTS=path.join(root,'data','contests.json');
- child=spawn(process.env.VP_TEST_PYTHON || 'python',['-u','server.py','--port','0'],{
+ child=spawn(process.env.VP_TEST_PYTHON || 'python',['-u',fullCatalog?'tests/room_features_fixture.py':'server.py','--port','0'],{
   cwd:root,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
  return new Promise((ok,fail)=>{
   let text='',err=''; const timeout=setTimeout(()=>fail(Error('Service startup timeout: '+err)),12000);

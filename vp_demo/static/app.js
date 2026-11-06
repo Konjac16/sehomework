@@ -185,7 +185,7 @@ async function startApplication(){
   try{
     if(typeof resetSourceUI!=='function'||typeof resetReviewUI!=='function'||typeof ensureStatement!=='function'||typeof resetHelper!=='function')throw new Error('新版源码模块未加载。请关闭旧版 VP Lab 服务，再重新运行 StartDemo.cmd 并刷新页面。');
     const health=await api('/api/health');
-    if(health.app!=='vplab'||health.apiVersion!==9)throw new Error('页面与服务版本不匹配，请重启 VP Lab 服务。');
+    if(health.app!=='vplab'||health.apiVersion!==10)throw new Error('页面与服务版本不匹配，请重启 VP Lab 服务。');
     await enter();
     $('#boot-status').hidden=true;
   }catch(error){showStartupError(error);}
