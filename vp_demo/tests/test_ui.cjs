@@ -7,7 +7,7 @@ const elements = new Map();
 const listeners = {};
 function element(key) {
   if (!elements.has(key)) elements.set(key, {innerHTML:'',textContent:'',value:'',hidden:false,open:false,
-    addEventListener(){},close(){this.open=false;},showModal(){this.open=true;},setAttribute(){},focus(){},scrollIntoView(){},classList:{toggle(){},remove(){},add(){}},querySelector(){return null;}});
+    addEventListener(){},close(){this.open=false;},showModal(){this.open=true;},setAttribute(){},focus(){},scrollIntoView(){},classList:{toggle(){},remove(){},add(){}},querySelector(){return null;},querySelectorAll(){return [];}});
   return elements.get(key);
 }
 const context = vm.createContext({console,URLSearchParams,setTimeout,clearTimeout,assert,
@@ -19,6 +19,8 @@ vm.runInContext(readFileSync(join(__dirname,'../static/statement.js'),'utf8'),co
 vm.runInContext(readFileSync(join(__dirname,'../static/review.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/source.js'),'utf8'),context);
 vm.runInContext(readFileSync(join(__dirname,'../static/training.js'),'utf8'),context);
+vm.runInContext(readFileSync(join(__dirname,'../static/intelligent.js'),'utf8'),context);
+vm.runInContext(readFileSync(join(__dirname,'../static/smart.js'),'utf8'),context);
 const appScript=readFileSync(join(__dirname,'../static/app.js'),'utf8').replace(/startApplication\(\);\s*$/,'');
 vm.runInContext(appScript,context);
 async function run(){
@@ -61,7 +63,7 @@ async function run(){
   await vm.runInContext(`openComparison('1900A','1')`,context);
   vm.runInContext(`assert.equal(sourceUI.comparison.before,'');resetSourceUI();assert.equal(sourceUI.comparison,null);assert.equal(state.detail.length,0);`,context);
   assert.equal(element('#detail').open,false);
-  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:9}:{user:null};`,context);
+  vm.runInContext(`api=async(path)=>path==='/api/health'?{app:'vplab',apiVersion:16}:{user:null};`,context);
   await vm.runInContext('startApplication()',context);
   assert.equal(element('#boot-status').hidden,true);
   assert.equal(element('#auth').hidden,false);
@@ -119,13 +121,14 @@ async function run(){
   await assert.rejects(vm.runInContext('pendingRequest',context),/账号已切换/);
   vm.runInContext(`assert.equal(libraryUI.selected,null);assert.equal(reviewUI.config,null);`,context);
   // The merged login flow must invalidate in-flight daily-training requests as well.
-  vm.runInContext(`trainingUI.data={private:true};trainingUI.busy=true;
+  vm.runInContext(`trainingUI.data={private:true};trainingUI.busy=true;intelligentUI.data={private:true};
     const beforeLogout=trainingUI.seq;showAuth();
-    assert.equal(trainingUI.data,null);assert.equal(trainingUI.busy,false);
+    assert.equal(trainingUI.data,null);assert.equal(trainingUI.busy,false);assert.equal(intelligentUI.data,null);
     assert.equal(trainingUI.seq,beforeLogout+1);assert.equal(state.user,null);`,context);
   const navigation=readFileSync(join(__dirname,'../static/index.html'),'utf8');
   assert(navigation.includes('id="open-duo"'));
   assert(navigation.includes('data-tab="training"'));
+  assert(navigation.includes('data-tab="intelligent"'));
   console.log('UI checks passed: source/diff views, AI preview without model calls, escaped results, snapshot comparison, logout isolation.');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

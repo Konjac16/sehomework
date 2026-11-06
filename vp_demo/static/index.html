@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>VP Lab · 让每一次训练有迹可循</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vendor/katex/katex.min.css"><link rel="stylesheet" href="/review.css"><link rel="stylesheet" href="/training.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>VP Lab · 让每一次训练有迹可循</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/vendor/katex/katex.min.css"><link rel="stylesheet" href="/review.css"><link rel="stylesheet" href="/training.css"><link rel="stylesheet" href="/intelligent.css"></head>
 <body>
 <div id="boot-status" class="boot-status" role="status"><strong id="boot-message">正在连接训练空间…</strong><p>若长时间未进入，请确认启动终端仍在运行。更新后需关闭旧服务，再重新运行 StartDemo.cmd。</p><a href="/">重新加载</a></div>
 <noscript>请启用浏览器 JavaScript 后重新加载页面。</noscript>
@@ -9,10 +9,11 @@
   <section class="auth-form-wrap"><form id="auth-form" class="auth-form"><span class="eyebrow">WELCOME TO VP LAB</span><h2 id="auth-title">开始你的训练档案</h2><p id="auth-description" class="muted">注册本地账号，数据保存在这台电脑上。</p><label>用户名<input name="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="给自己取个名字"></label><label>密码<input name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="至少 8 位"></label><button class="primary wide" id="auth-submit">注册并开始 <span>↗</span></button><p id="auth-error" class="error" role="alert"></p><button type="button" class="text-button wide" id="auth-toggle">已有账号？登录</button><div class="auth-note">无需提供 OJ 密码。通过 CF 官方 API 获取提交和源码，回看每次修改。</div></form></section>
 </div>
 <div id="shell" hidden>
- <aside class="sidebar"><div class="brand"><span class="brand-mark">V<span>↗</span></span> VP Lab <small>DEMO</small></div><p class="nav-label">训练工作台</p><nav id="navigation"><button id="open-duo"><span>⚑</span>VP 训练房</button><button data-tab="overview" class="active"><span>◫</span>训练概览</button><button data-tab="training"><span>↗</span>日常练习</button><button data-tab="portrait"><span>▥</span>能力画像</button><button data-tab="problems"><span>▤</span>题目与代码</button><button data-tab="history"><span>↻</span>提交历史</button><button data-tab="compare"><span>±</span>代码对比</button><button data-tab="predict"><span>↗</span>概率实验室</button><button data-tab="experiences"><span>▤</span>个人经验库</button><button data-tab="tasks"><span>☑</span>补题计划<i id="task-count">0</i></button></nav><div class="sidebar-bottom"><div class="development"><span class="status-dot"></span> 1～3 人训练房<p>单人可开练，也可<br>邀请队友一起参赛。</p></div><button class="settings-nav" data-tab="settings">⚙ 数据与账号</button><div class="account"><span class="avatar" id="avatar">U</span><div><b id="username"></b><small>本地训练空间</small></div><button id="logout" title="退出登录" aria-label="退出登录">↪</button></div></div></aside>
+ <aside class="sidebar"><div class="brand"><span class="brand-mark">V<span>↗</span></span> VP Lab <small>DEMO</small></div><p class="nav-label">训练工作台</p><nav id="navigation"><button id="open-duo"><span>⚑</span>VP 训练房</button><button data-tab="overview" class="active"><span>◫</span>训练概览</button><button data-tab="training"><span>↗</span>日常训练</button><button data-tab="intelligent"><span>◇</span>智能推荐</button><button data-tab="portrait"><span>▥</span>能力画像</button><button data-tab="problems"><span>▤</span>题目与代码</button><button data-tab="history"><span>↻</span>提交历史</button><button data-tab="compare"><span>±</span>代码对比</button><button data-tab="predict"><span>↗</span>概率实验室</button><button data-tab="experiences"><span>▤</span>个人经验库</button><button data-tab="tasks"><span>☑</span>补题计划<i id="task-count">0</i></button></nav><div class="sidebar-bottom"><div class="development"><span class="status-dot"></span> 1～3 人训练房<p>单人可开练，也可<br>邀请队友一起参赛。</p></div><button class="settings-nav" data-tab="settings">⚙ 数据与账号</button><div class="account"><span class="avatar" id="avatar">U</span><div><b id="username"></b><small>本地训练空间</small></div><button id="logout" title="退出登录" aria-label="退出登录">↪</button></div></div></aside>
  <div class="workspace"><header class="topbar"><div><span class="breadcrumb">工作台</span><span class="divider">/</span><span id="page-label">训练概览</span></div><div class="topbar-right"><span class="platform-pill"><span class="status-dot"></span> Codeforces</span><button class="secondary small" data-tab="settings">管理数据 ↗</button></div></header><main id="main"><div class="empty">正在加载训练空间…</div></main><footer>VP Lab / v0.3 <span>用事实记录训练，用反馈决定下一步。</span></footer></div>
 </div>
 <div id="toast" role="status" hidden></div>
+<dialog id="intelligent-material" class="intelligent-material" aria-label="题目资料"><form method="dialog"><button class="secondary">关闭</button></form><div id="intelligent-material-body"></div></dialog>
 <dialog id="detail"><div id="detail-content"></div></dialog>
 <dialog id="experience-editor"><div id="experience-editor-content"></div></dialog>
 <dialog id="helper-install"><div id="helper-install-content"></div></dialog>
@@ -23,5 +24,7 @@
 <script src="/review.js"></script>
 <script src="/source.js"></script>
 <script src="/training.js"></script>
+<script src="/intelligent.js"></script>
+<script src="/smart.js"></script>
 <script src="/app.js"></script>
 </body></html>

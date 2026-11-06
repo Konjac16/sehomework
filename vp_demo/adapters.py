@@ -111,6 +111,12 @@ class CodeforcesAdapter:
                     url=f"https://codeforces.com/{'gym' if int(cid) >= 100000 else 'contest'}/{cid}/problem/{urllib.parse.quote(index)}",
                     verdict=s.get("verdict") or "PENDING", submittedAt=timestamp,
                     participantType=author.get("participantType", "UNKNOWN"),
+                    participantMembers=([str(m['handle']) for m in members]
+                        if isinstance(author.get('members'), list) and members
+                        and all(isinstance(m, dict) and isinstance(m.get('handle'), str) for m in members) else None),
+                    partyStartTime=(author.get('startTimeSeconds')
+                        if type(author.get('startTimeSeconds')) is int and author['startTimeSeconds'] > 0 else None),
+                    teamId=author.get('teamId'), submissionContestId=s.get('contestId', cid),
                     language=s.get("programmingLanguage", ""), source=source,
                     timeMs=s.get("timeConsumedMillis"), memoryBytes=s.get("memoryConsumedBytes"))
 
