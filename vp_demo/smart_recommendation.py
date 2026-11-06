@@ -281,18 +281,26 @@ class SmartRecommendationService:
                     'candidates':list(candidates.values())},7200)
                 audit,qualified=validate_audit(canonicalize(raw,'assessments',candidates),candidates,intent)
                 all_audit.update(audit);eligible.extend(qualified);reviewed.update(top)
-                if eligible or (expanded and not statement_mode):break
-                if not statement_mode:expand();expanded=True
+                if eligible or any(a['match']=='moderate' for a in audit.values()):break
+                if not statement_mode and not expanded:expand();expanded=True
             diagnostics['audit']=all_audit
             chosen=None
-            if eligible:
-                update('rank',f'正在比较 {len(eligible)} 道匹配候选。')
-                qualified={p:audit_bundle(p)|{'assessment':all_audit[p]} for p in eligible}
+            rank_fallback=False
+            if reviewed:
+                update('rank',f'正在比较 {len(reviewed)} 道候选，选择本次最值得尝试的一题。')
+                qualified={p:audit_bundle(p)|{'assessment':all_audit[p]} for p in sorted(reviewed)}
                 rank=call('rank',{'preference':preference,'soft':intent['soft'],'candidates':list(qualified.values())},3200)
                 rank=canonicalize(rank,'assessments',qualified)
                 first=validate_rank(rank,qualified);diagnostics['rank']=rank
                 bounds=self.pool.settings(uid)['range'];mid=sum(bounds)/2
-                if first:chosen=min(first,key=lambda p:(p not in real_cards,abs(bundles[p]['problem']['rating']-mid),p))
+                if not first:
+                    # A valid but empty ranking must not turn available candidates into no recommendation.
+                    rank_fallback=True
+                    order={'strong':0,'moderate':1,'weak':2,'unknown':3}
+                    level=min(order[a['match']] for a in all_audit.values())
+                    first=[p for p in sorted(reviewed) if order[all_audit[p]['match']]==level]
+                chosen=min(first,key=lambda p:(p not in real_cards,abs(bundles[p]['problem']['rating']-mid),p))
+            diagnostics['rankFallback']=rank_fallback
 
             # Cache after selection. Only this new batch funds its own incomplete quota.
             fresh={p:bundles[p] for p in sorted(reviewed) if p not in real_cards and p not in failed_cards}
@@ -321,10 +329,15 @@ class SmartRecommendationService:
                 expected=bundles.get(pid,b)
                 if pid not in current or current[pid]['hash']!=expected['hash']:
                     raise PoolError('已有候选资料刚刚更新，请重新推荐。',409)
+            approximate=bool(chosen and (chosen not in eligible or rank_fallback))
             result={'preference':preference,'problem':bundles[chosen]['problem'] if chosen else None,
-                'problemId':chosen,'reasons':[REASONS[c] for c in intent['reasonCodes']] if chosen else [],
-                'message':'AI 根据已有资料审查选出；资料完整度不作为推荐的硬门槛。' if chosen else
-                    '在当前难度和做题记录范围内，本轮没有找到依据充分、明确符合要求的题。未放宽条件。',
+                'problemId':chosen,'reasons':(['作为本轮候选中较接近偏好的一题，建议尝试；不保证满足全部要求。'] if approximate else
+                    [REASONS[c] for c in intent['reasonCodes']] if chosen else []),
+                'matchLevel':all_audit[chosen]['match'] if chosen else None,'approximate':approximate,
+                'message':('AI 未给出明确首选，已按本轮匹配评估和难度选出一题供尝试。' if rank_fallback else
+                    '这是当前候选中推荐尝试的一题，可能只满足部分偏好，已有资料也可能不完整。' if approximate else
+                    'AI 根据已有资料比较选出；软偏好用于排序，不要求每项都完全满足。') if chosen else
+                    '当前难度、做题记录和方向范围内没有可送审的候选，请调整范围后重试。',
                 'candidateCount':len(bundles),'reviewedCount':len(reviewed),'qualifiedCount':len(eligible),
                 'searchedProblemCount':statement_result['problemCount'] if statement_mode else None,
                 'referenceCodeAvailable':bool(chosen and bundles[chosen]['reference_code_available']),

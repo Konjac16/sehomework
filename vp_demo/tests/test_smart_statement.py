@@ -187,13 +187,14 @@ class StatementWorkflowTests(unittest.TestCase):
     def test_no_match_audits_two_batches_without_editorial_fetch(self):
         write_archive(self.pack,count=30);self.pool.refresh(1)
         self.prepare_statement()
-        with patch('smart_recommendation.validate_audit',return_value=({},[])),\
-             patch.object(self.service,'editorials') as editorials:
+        self.provider.audit_match='weak';self.provider.criterion_state='no'
+        with patch.object(self.service,'editorials') as editorials:
             self.service.start(1,{'preference':'寻找音乐背景'});state=self.finish()
             editorials.prepare_one.assert_not_called()
         self.assertEqual(state['job']['status'],'completed',state['job'])
         self.assertEqual(state['recommendation']['reviewedCount'],16)
-        self.assertIsNone(state['recommendation']['problem'])
+        self.assertIsNotNone(state['recommendation']['problem'])
+        self.assertTrue(state['recommendation']['approximate'])
         self.assertEqual(sum(s=='audit' for s,_ in self.provider.calls),2)
 
 

@@ -23,6 +23,7 @@ class FakeProvider:
     model='test-only-synthetic'
     def __init__(self):
         self.calls=[];self.entered=threading.Event();self.release=None
+        self.audit_match='strong';self.criterion_state='yes';self.empty_rank=False
 
     def _request(self,prompt,inputs,key,generation,structured,model=None):
         stage=next(k for k,v in PROMPTS.items() if v==prompt)
@@ -43,14 +44,17 @@ class FakeProvider:
                     'criteria':[{'name':'c1','description':'本次偏好'}],'soft':[],'reasonCodes':['detail'],
                     'tagGroups':[],'excludeTags':[],'retrievalTarget':'mixed'}
         elif stage=='audit':
-            result={'assessments':{b['problem_id']:{'match':'strong','criteria':[
-                {'name':'c1','state':'yes','reason':'Synthetic hidden solution','evidence_ids':[b['evidence'][0]['evidence_id']]}],
+            result={'assessments':{b['problem_id']:{'match':self.audit_match,'criteria':[
+                {'name':'c1','state':self.criterion_state,'reason':'Synthetic hidden solution','evidence_ids':[b['evidence'][0]['evidence_id']]}],
                 'reason':'Synthetic hidden solution','tradeoff':'Fixture only','evidence_ids':[b['evidence'][0]['evidence_id']]}
                 for b in inputs['candidates']}}
         else:
             result={'first':[b['problem_id'] for b in inputs['candidates']],
                 'assessments':{b['problem_id']:{'tier':'first','reason':'Synthetic hidden solution','evidence_ids':[b['evidence'][0]['evidence_id']]}
                                for b in inputs['candidates']},'tradeoff':'Fixture only'}
+            if self.empty_rank:
+                result['first']=[]
+                for a in result['assessments'].values():a['tier']='later'
         return json.dumps(result,ensure_ascii=False),{'total_tokens':100},self.model
 
 
@@ -154,12 +158,47 @@ class SmartTests(unittest.TestCase):
             {'name':'not-current-preference','state':'yes','reason':'bad','evidence_ids':['p:one']}],
             'reason':'bad','tradeoff':''}}},candidate,{'criteria':[{'name':'c1'}]})
 
-    def test_no_strong_candidate_is_a_saved_no_match(self):
-        with patch('smart_recommendation.validate_audit',return_value=({},[])):
-            self.service.start(1,{'preference':'练习细节'});result=self.finish()
+    def test_no_strong_candidate_still_returns_honestly_labeled_choice(self):
+        self.provider.audit_match='weak';self.provider.criterion_state='no'
+        self.service.start(1,{'preference':'练习细节'});result=self.finish()
         self.assertEqual(result['job']['status'],'completed')
-        self.assertIsNone(result['recommendation']['problem'])
-        self.assertNotIn('rank',[s for s,_ in self.provider.calls])
+        self.assertIsNotNone(result['recommendation']['problem'])
+        self.assertEqual(result['recommendation']['qualifiedCount'],0)
+        self.assertTrue(result['recommendation']['approximate'])
+        self.assertEqual(result['recommendation']['matchLevel'],'weak')
+        self.assertIn('rank',[s for s,_ in self.provider.calls])
+        self.assertNotIn('Synthetic hidden solution',json.dumps(result))
+
+    def test_partial_match_can_be_ranked_without_second_audit(self):
+        self.provider.audit_match='moderate';self.provider.criterion_state='partial'
+        self.service.start(1,{'preference':'练习细节'});result=self.finish()
+        self.assertEqual(result['job']['status'],'completed')
+        self.assertIsNotNone(result['recommendation']['problem'])
+        self.assertTrue(result['recommendation']['approximate'])
+        self.assertEqual(sum(s=='audit' for s,_ in self.provider.calls),1)
+
+    def test_empty_valid_ranking_falls_back_to_an_evaluated_candidate(self):
+        self.provider.empty_rank=True
+        self.service.start(1,{'preference':'练习细节'});result=self.finish()
+        self.assertEqual(result['job']['status'],'completed')
+        self.assertIsNotNone(result['recommendation']['problem'])
+        self.assertTrue(result['recommendation']['approximate'])
+        self.assertIn('AI 未给出明确首选',result['recommendation']['message'])
+
+    def test_expanded_mixed_search_still_reviews_second_batch(self):
+        pool_tests.write_archive(self.pack,count=30);self.pool.refresh(1)
+        # Force early expansion with fewer than eight initial cached entries.
+        original=self.service._inputs
+        def small(uid):
+            bundles,input_hash=original(uid)
+            return dict(list(bundles.items())[:3]),input_hash
+        self.service._inputs=small
+        self.provider.audit_match='unknown';self.provider.criterion_state='unknown'
+        self.service.start(1,{'preference':'练习细节'});result=self.finish()
+        self.assertEqual(result['job']['status'],'completed',result['job'])
+        self.assertEqual(result['recommendation']['reviewedCount'],16)
+        self.assertIsNotNone(result['recommendation']['problem'])
+        self.assertEqual(sum(s=='audit' for s,_ in self.provider.calls),2)
 
     def test_exact_display_ids_are_normalized_but_invented_ids_rejected(self):
         candidates={'cf:1336:C':{'problem':{'problemKey':'1336C'}}}

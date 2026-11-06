@@ -10,7 +10,7 @@ from smart_retrieval_policy import SOURCE_WEIGHTS
 
 PROMPTS = {name:(Path(__file__).parent/'prompts'/f'smart-{name}.txt').read_text(encoding='utf-8')
            for name in ('card','intent','audit','rank')}
-VERSION = signature({'prompts':PROMPTS,'workflow':6})
+VERSION = signature({'prompts':PROMPTS,'workflow':7})
 REASONS = {
     'implementation':'适合练习代码组织与实现配合。',
     'detail':'适合把细节处理作为本次训练重点。',
