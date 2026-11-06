@@ -7,12 +7,12 @@ out=public/'workspace';out.mkdir(parents=True,exist_ok=True)
 static=root/'static'
 html=(static/'index.html').read_text().split('<body>',1)[1].split('</body>',1)[0]
 html=re.sub(r'<script[\s\S]*?</script>','',html)
-links=''.join(f'<link rel="stylesheet" href="/workspace/{name}">' for name in ['style.css','review.css','training.css','theme.css'])+'<link rel="stylesheet" href="/vendor/katex/katex.min.css">'
-(out/'index.html').write_text(links+html)
-for name in ['style.css','review.css','training.css']:
+links=''.join(f'<link rel="stylesheet" href="/workspace/{name}">' for name in ['style.css','review.css','training.css','intelligent.css','theme.css'])+'<link rel="stylesheet" href="/vendor/katex/katex.min.css">'
+(out/'index.html').write_text(links+html.strip()+'\n')
+for name in ['style.css','review.css','training.css','intelligent.css']:
  s=(static/name).read_text().replace(':root',':host').replace('body {',':host {')
  (out/name).write_text(s)
-for name in ['helper','statement-format','statement','review','source','training','app']:
+for name in ['helper','statement-format','statement','review','source','training','smart','intelligent','app']:
  s=re.sub(r'\bdocument(?=\s*[.)])','window.vpDocument',(static/(name+'.js')).read_text())
  if name=='app':
   s=re.sub(r'startApplication\(\);\s*$','',s)

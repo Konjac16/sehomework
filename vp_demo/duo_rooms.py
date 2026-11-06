@@ -6,6 +6,11 @@ import time
 from collections import Counter
 from zipfile import ZipFile
 from duo_rules import MAX_MEMBERS, RoomError, check_replay, integer, read_catalog, sample_events, scoreboard
+from duo_recommendations import recommend_contests
+from duo_report import build_report
+
+SYNC_INTERVAL_SECONDS = 15
+SYNC_STALE_SECONDS = 90
 
 DDL = """
 CREATE TABLE IF NOT EXISTS vp_rooms (
@@ -63,6 +68,7 @@ class DuoRooms:
         self.reading_pack = catalog_path if catalog_path.suffix.lower() == ".zip" else None
         self.indices = {cid: {p["index"] for p in contest["problems"]} for cid, contest in self.catalog.items()}
         self.syncing = set()
+        self.sync_attempts = {}
 
     @staticmethod
     def init_tables(c):
@@ -113,6 +119,51 @@ class DuoRooms:
     def _eligible(self, c, r, ms, cid):
         return (cid in self.catalog and self.catalog[cid]["durationSeconds"] <= 60*r["max_minutes"]
                 and (r["allow_seen"] or not self._overlaps(c, ms)[cid]))
+
+    def _recommendations(self, c, r, members):
+        profiles = []
+        for member in members:
+            settings = self._settings(c, member["uid"])
+            reference = settings.get("referenceRating")
+            if type(reference) is not int or not 0 <= reference <= 4000:
+                profile = settings.get("profile") or {}
+                same_handle = str(profile.get("handle") or settings.get("handle", "")).casefold() == member["handle"].casefold()
+                reference = profile.get("rating") if same_handle else None
+            if type(reference) is not int or not 0 <= reference <= 4000:
+                reference = None
+            profiles.append(dict(slot=member["slot"], handle=member["handle"], referenceRating=reference))
+        rows = recommend_contests(self.catalog, profiles, self._overlaps(c, members),
+                                  r["max_minutes"], bool(r["allow_seen"]))
+        note = "先按时长和已知接触记录筛选，再兼顾全员适配与较弱成员；规则推荐不代表通过概率。"
+        if any(p["referenceRating"] is None for p in profiles):
+            note += " 部分成员缺少参考水平，适配判断有限；可在个人工作台设置参考 Rating 或同步 CF 资料。"
+        return rows, note
+
+    def auto_sync_once(self):
+        """Refresh one due seat, fairly across rooms. No network call holds the DB lock."""
+        now = int(self.clock())
+        with self.lock, self.connect() as c:
+            rows = c.execute("SELECT m.room_id,m.uid,m.slot,r.start_at FROM vp_members m "
+                             "JOIN vp_rooms r ON r.id=m.room_id WHERE r.mode='training' "
+                             "AND r.phase IN ('RUNNING','SETTLING')").fetchall()
+            active = {(r["room_id"], r["uid"]) for r in rows}
+            self.sync_attempts = {k: v for k, v in self.sync_attempts.items() if k in active}
+            due = []
+            for row in rows:
+                marker = (row["room_id"], row["uid"])
+                attempted = self.sync_attempts.get(marker)
+                if marker not in self.syncing and (attempted is None or now-attempted >= SYNC_INTERVAL_SECONDS):
+                    due.append((attempted if attempted is not None else -1, row["start_at"],
+                                row["slot"], row["room_id"], row["uid"]))
+            if not due:
+                return False
+            _, _, _, rid, uid = min(due)
+        try:
+            self._sync(uid, rid)
+        except RoomError:
+            # Failures are recorded per member by _sync; the next seat still gets a turn.
+            pass
+        return True
 
     @staticmethod
     def _invited_room(c, code):
@@ -216,12 +267,18 @@ class DuoRooms:
                "maxMinutes": r["max_minutes"], "allowSeen": bool(r["allow_seen"]), "selected": None,
                "members": [{"slot": m["slot"], "handle": m["handle"], "isMe": m["uid"] == uid,
                             "ready": bool(m["ready"]), "syncedAt": m["synced_at"], "syncError": m["sync_error"],
+                            "syncing": (rid, m["uid"]) in self.syncing,
+                            "syncDelayed": (r["mode"] == "training" and r["phase"] in ("RUNNING", "SETTLING")
+                                            and now-(m["synced_at"] or r["start_at"]) > SYNC_STALE_SECONDS),
                             "through": m["sync_through"]} for m in ms],
-               "candidates": [], "problems": [], "standings": [], "upsolves": [], "elapsedSeconds": 0}
+               "autoSync": {"enabled": False, "intervalSeconds": SYNC_INTERVAL_SECONDS, "staleAfterSeconds": SYNC_STALE_SECONDS},
+               "candidates": [], "recommendations": [], "recommendationNote": "", "report": None,
+               "problems": [], "standings": [], "upsolves": [], "elapsedSeconds": 0}
         if chosen:
             out["selected"] = {k: chosen[k] for k in ("contestId", "name", "durationSeconds")}
         if r["phase"] == "WAITING":
             out["candidates"], out["candidatePage"] = self._options(c, r, ms, query or {})
+            out["recommendations"], out["recommendationNote"] = self._recommendations(c, r, ms)
             return out
         if r["phase"] == "CANCELLED":
             return out
@@ -236,7 +293,8 @@ class DuoRooms:
             events = json.loads(r["replay"]) if r["mode"] == "replay" else [e for m in ms for e in json.loads(m["events"])]
             board = scoreboard(ms, chosen, events, elapsed)
             if elapsed == duration:
-                complete = r["mode"] == "replay" or all((m["sync_through"] or 0) >= r["end_at"] for m in ms)
+                complete = r["mode"] == "replay" or (all((m["sync_through"] or 0) >= r["end_at"] for m in ms)
+                            and not any((rid, m["uid"]) in self.syncing for m in ms))
                 pending = any(cell["pending"] for row in board for cell in row["cells"].values())
                 if complete and not pending:
                     self._finish(c, r, ms, chosen, board, now)
@@ -244,7 +302,11 @@ class DuoRooms:
                     c.execute("UPDATE vp_rooms SET phase='SETTLING' WHERE id=?", (rid,))
                     r["phase"] = "SETTLING"
         out.update(phase=r["phase"], standings=board, settledAt=r["settled_at"])
+        out["autoSync"]["enabled"] = r["mode"] == "training" and r["phase"] in ("RUNNING", "SETTLING")
         if r["phase"] == "FINISHED":
+            out["report"] = build_report(chosen, board, mode=r["mode"], settled_at=r["settled_at"])
+            for member in out["members"]:
+                member["syncDelayed"] = False
             rows = c.execute("SELECT v.idx,v.task_id,COALESCE(t.done,v.demo_done) AS done FROM vp_upsolves v "
                              "LEFT JOIN tasks t ON t.id=v.task_id WHERE v.room_id=? AND v.uid=? ORDER BY v.idx", (rid, uid))
             by_idx = {p["index"]: p for p in chosen["problems"]}
@@ -263,6 +325,8 @@ class DuoRooms:
             m = next(x for x in self._members(c, rid) if x["uid"] == uid)
             began = int(self.clock())
             self.syncing.add(marker)
+            self.sync_attempts[marker] = began
+        released = False
         try:
             try:
                 events = fetch_cf_events(self.adapter, json.loads(r["chosen"]), m, r["start_at"], r["end_at"])
@@ -274,10 +338,15 @@ class DuoRooms:
             with self.lock, self.connect() as c:
                 c.execute("UPDATE vp_members SET synced_at=?,sync_through=?,sync_error='',events=? WHERE room_id=? AND uid=?",
                           (int(self.clock()), began, dump(events), rid, uid))
+                self.syncing.discard(marker)
+                self.sync_attempts[marker] = int(self.clock())
+                released = True
                 return self._view(c, uid, rid)
         finally:
-            with self.lock:
-                self.syncing.discard(marker)
+            if not released:
+                with self.lock:
+                    self.syncing.discard(marker)
+                    self.sync_attempts[marker] = int(self.clock())
 
     def handle(self, method, path, uid, data=None, query=None):
         data = data or {}
@@ -290,6 +359,13 @@ class DuoRooms:
                 return self._statement(c, uid, rid, (query or {}).get("index", ""))
         if method == "POST" and action == "sync":
             return self._sync(uid, rid)
+        if method == "GET" and action == "report":
+            with self.lock, self.connect() as c:
+                c.execute("BEGIN IMMEDIATE")
+                view = self._view(c, uid, rid)
+                if view["phase"] != "FINISHED":
+                    raise RoomError("终场结算后才能查看战报", 409)
+                return view["report"]
         with self.lock, self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
             if method == "GET" and rid == "invite" and not action:

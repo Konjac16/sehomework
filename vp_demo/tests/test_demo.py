@@ -44,8 +44,8 @@ class DomainTests(unittest.TestCase):
     def test_running_server_must_identify_as_compatible_vplab(self):
         with patch('server.urllib.request.build_opener') as build:
             response = build.return_value.open.return_value.__enter__.return_value
-            for payload, expected in (({'app':'vplab','apiVersion':9}, True),
-                                      ({'app':'vplab','apiVersion':8}, False),
+            for payload, expected in (({'app':'vplab','apiVersion':server.API_VERSION}, True),
+                                      ({'app':'vplab','apiVersion':server.API_VERSION-1}, False),
                                       ({'app':'other','apiVersion':7}, False),
                                       ({'app':'vplab','apiVersion':1}, False), ([], False)):
                 response.read.return_value = json.dumps(payload).encode()
@@ -214,8 +214,8 @@ class HttpTests(unittest.TestCase):
 
     def test_boot_assets_and_exclusive_port(self):
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        self.assertEqual(self.request(client, '/api/health'), (200, {'app':'vplab','apiVersion':9}))
-        for path in ('/', '/source.js', '/app.js', '/review.js', '/review.css', '/statement.js', '/helper.js', '/training.js', '/training.css', '/duo', '/duo.js', '/duo.css'):
+        self.assertEqual(self.request(client, '/api/health'), (200, {'app':'vplab','apiVersion':server.API_VERSION}))
+        for path in ('/', '/source.js', '/app.js', '/review.js', '/review.css', '/statement.js', '/helper.js', '/training.js', '/training.css', '/duo', '/duo.js', '/duo.css', '/intelligent.js', '/intelligent.css'):
             status, body = self.request(client, path)
             self.assertEqual(status, 200)
             self.assertGreater(len(body), 100)
@@ -258,7 +258,14 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(state['history'][0]['status'], 'completed')
             self.assertEqual(self.request(bob, '/api/training')[1]['history'], [])
             self.assertIsNone(self.request(alice, '/api/recommendations', {})[1]['recommendation'])
-            self.assertEqual(self.request(alice, '/api/recommendations', {'mode':'focused'})[0], 400)
+            status,focused=self.request(alice, '/api/recommendations', {'mode':'focused'})
+            self.assertEqual(status,200)
+            self.assertEqual(focused['mode'],'focused')
+            self.assertIsNone(focused['recommendation'])
+            self.assertEqual(self.request(alice, '/api/recommendations', {'mode':'unknown'})[0], 400)
+            self.assertEqual(self.request(alice, '/api/training/mode', {'mode':'focused'})[1]['mode'],'focused')
+            self.assertEqual(self.request(alice, '/api/training')[1]['mode'],'focused')
+            self.assertEqual(self.request(bob, '/api/training')[1]['mode'],'daily')
 
     def test_accounts_and_task_permissions(self):
         alice, bob = self.client("alice_test"), self.client("bob_test")

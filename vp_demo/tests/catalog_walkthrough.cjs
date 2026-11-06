@@ -18,10 +18,10 @@ async function checkTrainingTask({a,b,base,root,db,confirmReady,shot}){
  const guestHandle=b.locator('#accept-invite [name=handle]');
  await guestHandle.waitFor();assert.equal(await guestHandle.evaluate(e=>e.required),true);
  await guestHandle.fill('vp_fixture_b');await b.locator('#accept-invite .primary').click();
- await a.bringToFront();await a.getByText('席位 2　vp_fixture_b',{exact:true}).waitFor();
+ await a.bringToFront();await a.locator('.member-identity b').filter({hasText:'vp_fixture_b'}).waitFor();
  await query(a,'4');await a.locator('[data-pick="4"]').click();await a.locator('[data-do=start]:disabled').waitFor();
  await b.bringToFront();await confirmReady(b);await a.bringToFront();await a.locator('[data-do=start]:enabled').click();
- await a.getByRole('button',{name:'同步我的 CF 提交'}).waitFor();
+ await a.getByRole('button',{name:'重试我的同步'}).waitFor();
  assert.equal(await a.locator('[data-advance]').count(),0);
  const id=new URL(a.url()).searchParams.get('room');
  const fixture=spawnSync(process.env.VP_TEST_PYTHON||'python',['-X','utf8',path.join(root,'tests','settle_browser_training.py'),db,id],{env:{...process.env,VPLAB_CONTESTS:catalogPack(root)},encoding:'utf8',windowsHide:true});
@@ -86,7 +86,7 @@ module.exports=async({a,b,base,root,db,evidence,auth,createReplay,confirmReady,t
  const outsider=await b.request.get(base+api+'/statement?index=B');assert.equal(outsider.status(),404);
  await b.locator('#accept-invite').getByRole('button',{name:'加入房间'}).click();
  await b.locator('#invite-code').waitFor();
- await a.bringToFront();await a.getByText('席位 2　beta',{exact:true}).waitFor();
+ await a.bringToFront();await a.locator('.member-identity b').filter({hasText:'beta'}).waitFor();
  step('邀请跨过注册页',{invitePath:inviteUrl.pathname,afterRegistration:'接受邀请',guestName:identities[1].user.username});
  const initial=await get(a,api);
  assert.equal(initial.candidatePage.total,1996);assert.equal(initial.candidatePage.eligible,1342);

@@ -1,0 +1,2 @@
+# Optional: automatic extraction of text-based editorial PDFs.
+pypdf>=6.0,<7

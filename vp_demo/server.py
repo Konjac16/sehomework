@@ -30,9 +30,14 @@ from browser_bridge import BrowserBridge
 from training_service import TrainingService
 from duo_rooms import DuoRooms
 from duo_rules import RoomError
+from duo_sync import RoomAutoSync
+from training_archive import TrainingArchive
+from recommendation_pool import SmartRecommendationPool, PoolError
+from editorial_service import EditorialService
+from smart_recommendation import SmartRecommendationService
 
 ROOT = Path(__file__).resolve().parent
-API_VERSION = 9
+API_VERSION = 17
 DB = Path(os.environ.get("VPLAB_DB", str(ROOT / ".local" / "vplab.sqlite3")))
 SAMPLE = Path(os.environ.get("VPLAB_SAMPLE", "E:/codeforces_submissions.jsonl"))
 SESSIONS = {}
@@ -145,6 +150,8 @@ def init_db():
         StatementService.init_tables(c)
         TrainingService.init_tables(c)
         DuoRooms.init_tables(c)
+        SmartRecommendationPool.init_tables(c)
+        SmartRecommendationService.init_tables(c)
 
 
 def user_settings(uid):
@@ -188,6 +195,15 @@ STATEMENTS = StatementService(connect, ADAPTERS)
 REVIEWS = ReviewService(connect, DB_LOCK, user_records, user_settings, STATEMENTS.cached_for)
 BRIDGE = BrowserBridge(STATEMENTS)
 TRAINING = TrainingService(connect, DB_LOCK, ADAPTERS)
+INTELLIGENT = SmartRecommendationPool(connect, DB_LOCK, TrainingArchive(
+    os.environ.get('VPLAB_INTELLIGENT_ARCHIVE', ROOT / 'data' / 'vp-ready.zip')), catalog_loader=TRAINING.catalog)
+EDITORIALS = EditorialService(connect, DB_LOCK, pool=INTELLIGENT)
+
+def smart_api_key(uid):
+    with REVIEWS.lock:
+        return REVIEWS.keys.get(uid) or os.environ.get('DEEPSEEK_API_KEY','')
+
+SMART = SmartRecommendationService(connect, DB_LOCK, INTELLIGENT, smart_api_key, editorials=EDITORIALS)
 _pool = ROOT / "data" / "vp-ready.zip"
 ROOMS = DuoRooms(connect, DB_LOCK, ADAPTERS["codeforces"],
                  Path(os.environ.get("VPLAB_CONTESTS", _pool if _pool.is_file() else ROOT / "data" / "contests.json")))
@@ -232,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             self.get_route()
-        except RoomError as exc:
+        except (RoomError, PoolError) as exc:
             self.send({"error": str(exc)}, exc.status)
         except ReviewError as exc:
             self.send({"error": str(exc)}, exc.status)
@@ -276,7 +292,7 @@ class Handler(BaseHTTPRequestHandler):
                     if file.suffix in ('.js', '.json', '.txt'):
                         z.write(file, 'VP-Lab-Browser-Helper/' + file.name)
             return self.send(buf.getvalue(), content_type='application/zip', extra={'Content-Disposition': 'attachment; filename="VP-Lab-Browser-Helper.zip"'})
-        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/statement-format.js", "/helper.js", "/training.js", "/training.css", "/style.css", "/review.css"):
+        if path in ("/", "/app.js", "/source.js", "/review.js", "/statement.js", "/statement-format.js", "/helper.js", "/training.js", "/training.css", "/intelligent.js", "/smart.js", "/intelligent.css", "/style.css", "/review.css"):
             name = "index.html" if path == "/" else path[1:]
             mime = "text/html" if path == "/" else "text/javascript" if path.endswith(".js") else "text/css"
             return self.send((ROOT / "static" / name).read_bytes(), content_type=mime + "; charset=utf-8")
@@ -290,8 +306,16 @@ class Handler(BaseHTTPRequestHandler):
         if not uid:
             return self.send({"error": "请先登录"}, 401)
         q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        if path == '/api/intelligent/pool':
+            return self.send(INTELLIGENT.state(uid))
+        if path == '/api/intelligent/recommendation':
+            return self.send(SMART.state(uid))
+        if path == '/api/intelligent/material':
+            return self.send(INTELLIGENT.material(uid, q.get('id', '')))
+        if path == '/api/intelligent/editorials':
+            return self.send({'job': EDITORIALS.status(uid)})
         if path in ("/api/training", "/api/training/preferences"):
-            return self.send(TRAINING.state(uid))
+            return self.send(TRAINING.state(uid,q.get('mode')))
         if path == "/api/rooms" or path.startswith("/api/rooms/"):
             return self.send(ROOMS.handle("GET", path, uid, query=q))
         if path == '/api/browser/status':
@@ -430,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError("请求格式错误")
             self.post_route(urlparse(self.path).path, data)
-        except RoomError as exc:
+        except (RoomError, PoolError) as exc:
             self.send({"error": str(exc)}, exc.status)
         except ReviewError as exc:
             self.send({"error": str(exc)}, exc.status)
@@ -468,6 +492,41 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({"error": "请先登录"}, 401)
         if path == "/api/training/preferences":
             return self.send(TRAINING.preferences(uid, data))
+        if path == '/api/training/mode':
+            return self.send(TRAINING.select_mode(uid,data))
+        if path == '/api/intelligent/settings':
+            if uid in SMART.active or EDITORIALS.status(uid).get('status')=='running':
+                raise PoolError('请先停止当前推荐或资料准备，再修改设置。',409)
+            return self.send(INTELLIGENT.settings(uid,data))
+        if path == '/api/intelligent/recommendation':
+            with SMART.lock, EDITORIALS.lock:
+                if any(j.get('status')=='running' for j in EDITORIALS.jobs.values()):
+                    raise PoolError('资料仍在准备，请完成后再生成推荐。',409)
+                result=SMART.start(uid,data)
+            return self.send(result)
+        if path == '/api/intelligent/recommendation/cancel':
+            if data:raise PoolError('此操作不接受额外参数。')
+            return self.send(SMART.cancel(uid))
+        if path in ('/api/intelligent/editorials', '/api/intelligent/editorials/cancel'):
+            if data:
+                raise PoolError('题解准备只处理当前候选池，不接受外部地址。')
+            with SMART.lock, EDITORIALS.lock:
+                if SMART.active:raise PoolError('AI 推荐正在运行，请先停止推荐。',409)
+                job = EDITORIALS.cancel(uid) if path.endswith('/cancel') else EDITORIALS.start(uid)
+            return self.send({'job':job},202)
+        if path in ('/api/intelligent/prepare', '/api/intelligent/sync'):
+            if uid in SMART.active:raise PoolError('AI 推荐正在运行，请先停止推荐。',409)
+            if data:
+                raise PoolError('候选准备由系统管理，此接口不接受选题参数。')
+            if path.endswith('/sync'):
+                settings = user_settings(uid)
+                if not settings.get('handle'):
+                    raise PoolError('请先在数据与账号中绑定 CF 账号。')
+                if get_sync_job(uid).get('status') == 'running':
+                    raise PoolError('提交同步正在进行，请稍后整理候选。', 409)
+                result = ADAPTERS['codeforces'].sync(settings['handle'])
+                save_records(uid, result['records'], result['scope'], result['profile'])
+            return self.send(INTELLIGENT.refresh(uid))
         if path == "/api/recommendations":
             return self.send(TRAINING.recommend(uid, data))
         if path in ("/api/training/start", "/api/training/dismiss", "/api/training/skip", "/api/training/resume", "/api/training/feedback"):
@@ -479,7 +538,7 @@ class Handler(BaseHTTPRequestHandler):
             if get_sync_job(uid).get("status") != "running" and time.time() - settings.get("lastSync", 0) >= 30:
                 result = ADAPTERS["codeforces"].sync(settings["handle"])
                 save_records(uid, result["records"], result["scope"], result["profile"])
-            return self.send(TRAINING.state(uid))
+            return self.send(TRAINING.state(uid,data.get('mode')))
         if path == "/api/logout":
             cookie = SimpleCookie(self.headers.get("Cookie", ""))
             with SESSION_LOCK:
@@ -669,6 +728,9 @@ def main():
         raise SystemExit(1)
     args.port = server.server_port
     REVIEWS.recover()
+    SMART.recover()
+    room_sync = RoomAutoSync(ROOMS)
+    room_sync.start()
     print(f"VP Lab: http://127.0.0.1:{args.port}", flush=True)
     if args.browser:
         threading.Timer(0.7, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}" + ("/duo" if args.duo else ""))).start()
@@ -677,6 +739,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        room_sync.stop()
         server.server_close()
 
 
