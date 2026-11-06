@@ -1,6 +1,6 @@
 'use strict';
-const smartUI={data:null,seq:0,timer:null,busy:false,error:''};
-function resetSmart(){clearTimeout(smartUI.timer);smartUI.seq++;smartUI.data=null;smartUI.busy=false;smartUI.error='';}
+const smartUI={data:null,seq:0,timer:null,busy:false,error:'',poolSyncedJob:null};
+function resetSmart(){clearTimeout(smartUI.timer);smartUI.seq++;smartUI.data=null;smartUI.busy=false;smartUI.error='';smartUI.poolSyncedJob=null;}
 function smartRunning(){return ['running','cancelling'].includes(smartUI.data?.job?.status);}
 function smartSettings(){
  const d=smartUI.data;if(!d||!$('#smart-controls'))return;
@@ -39,7 +39,13 @@ async function loadSmart(){
 }
 async function pollSmart(){
  clearTimeout(smartUI.timer);const seq=smartUI.seq;
- try{const d=await api('/api/intelligent/recommendation');if(seq!==smartUI.seq||!state.user||state.tab!=='intelligent')return;smartUI.data=d;drawSmartResult();drawIntelligent();}
+ try{const d=await api('/api/intelligent/recommendation');if(seq!==smartUI.seq||!state.user||state.tab!=='intelligent')return;smartUI.data=d;drawSmartResult();drawIntelligent();
+  if(d.job.id&&!smartRunning()&&smartUI.poolSyncedJob!==d.job.id){
+   const poolSeq=intelligentUI.seq,pool=await api('/api/intelligent/pool');
+   if(seq!==smartUI.seq||poolSeq!==intelligentUI.seq||!state.user||state.tab!=='intelligent')return;
+   intelligentUI.data=pool;smartUI.poolSyncedJob=d.job.id;drawIntelligent();
+  }
+ }
  catch(err){if(seq===smartUI.seq&&state.tab==='intelligent'){smartUI.error=err.message;drawSmartResult();}}
  finally{if(seq===smartUI.seq&&state.user&&state.tab==='intelligent'&&smartRunning())smartUI.timer=setTimeout(pollSmart,3000);}
 }

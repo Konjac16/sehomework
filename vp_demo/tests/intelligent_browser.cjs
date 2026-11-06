@@ -42,8 +42,13 @@ async function boot(){
   assert.equal(imported.status(),200);
   await context.request.post(base+'/api/intelligent/settings',{data:{includeAttempted:true}});
   await page.locator('[data-tab=intelligent]').first().click();
+  assert.equal(await page.locator('#intelligent-base').getAttribute('open'),null);
+  await page.locator('#intelligent-base > summary').click();
   await page.locator('[data-intelligent=prepare]').click();
-  await page.getByRole('heading',{name:'已准备 13 道候选'}).waitFor();
+  await page.getByRole('heading',{name:'基础资料池 · 13 道'}).waitFor();
+  assert.equal(await page.locator('[data-metric=available]').innerText(),'13');
+  assert.equal(await page.locator('[data-metric=statements]').innerText(),'13');
+  assert.equal(await page.locator('[data-metric=cards]').innerText(),'0');
   assert.equal(await page.locator('.intelligent-table tbody tr').count(),10);
   assert(! (await page.locator('#intelligent-content').innerText()).includes('hidden-algorithm'));
   await page.locator('[data-intelligent=next]').click();assert.equal(await page.locator('.intelligent-table tbody tr').count(),3);
@@ -64,16 +69,19 @@ async function boot(){
   await page.locator('.smart-choice').waitFor();
   const saved=await (await context.request.get(base+'/api/intelligent/recommendation')).json();
   assert.equal(saved.job.status,'completed');assert(saved.recommendation.problem);
+  await page.waitForFunction(n=>document.querySelector('[data-metric=cards]')?.textContent===String(n),saved.recommendation.admittedCards);
   assert(!(await page.locator('#smart-result').innerText()).includes('Synthetic hidden solution'));
   assert(!(await page.locator('#smart-result').innerText()).includes('hidden-algorithm'));
   await page.goto(base+'/?tab=intelligent');
   await page.locator('.smart-choice').waitFor();
+  assert.equal(await page.locator('#intelligent-base').getAttribute('open'),null);
   assert.equal((await (await context.request.get(base+'/api/intelligent/recommendation')).json()).recommendation.id,saved.recommendation.id);
   await page.locator('#smart-generate').click();
   await page.getByText('已复用相同条件的推荐，无新增模型调用。',{exact:true}).waitFor();
   assert.equal((await (await context.request.get(base+'/api/intelligent/recommendation')).json()).job.calls,0);
 
   if(evidence){fs.mkdirSync(evidence,{recursive:true});await page.screenshot({path:path.join(evidence,'pool-desktop.png'),fullPage:true});}
+  await page.locator('#intelligent-base > summary').click();
   await page.locator('.intelligent-table [data-intelligent=material]').first().click();
   await page.locator('#intelligent-material').waitFor({state:'visible'});
   assert((await page.locator('#intelligent-material-body').innerText()).includes('Describe an independent public problem'));
@@ -84,13 +92,16 @@ async function boot(){
   assert.equal(await page.locator('#intelligent-material-body script').count(),0);
   await page.locator('#intelligent-material form button').click();
   await page.locator('#intelligent-material').waitFor({state:'hidden'});
+  await page.locator('#intelligent-base > summary').click();
   await page.setViewportSize({width:390,height:844});
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   if(evidence)await page.screenshot({path:path.join(evidence,'pool-mobile.png'),fullPage:true});
   await page.setViewportSize({width:1380,height:980});
+  await page.locator('#intelligent-base > summary').click();
   await context.request.post(base+'/api/import',{data:{text:JSON.stringify([raw(2,'OK','PRACTICE',250)])}});
   await page.locator('[data-intelligent=prepare]').click();
-  await page.getByRole('heading',{name:'已准备 12 道候选'}).waitFor();
+  await page.getByRole('heading',{name:'基础资料池 · 12 道'}).waitFor();
+  assert.equal(await page.locator('[data-metric=available]').innerText(),'12');
   assert.equal(await page.locator('.intelligent-table [data-key="cf:1:A1"]').count(),0);
   const other=await browser.newContext();
   assert.equal((await other.request.post(base+'/api/register',{data:{username:'pool_browser_other',password:'pool-fixture-password'}})).status(),200);
@@ -98,7 +109,8 @@ async function boot(){
   assert.equal((await (await other.request.get(base+'/api/intelligent/pool')).json()).prepared,false);
   await page.locator('#open-duo').click();await page.locator('#create').waitFor();
   await page.locator('a.back').click();await page.locator('#shell').waitFor({state:'visible'});
-  await page.locator('[data-tab=intelligent]').first().click();await page.getByRole('heading',{name:'已准备 12 道候选'}).waitFor();
+  await page.locator('[data-tab=intelligent]').first().click();await page.locator('[data-metric=available]').waitFor();
+  assert.equal(await page.locator('[data-metric=available]').innerText(),'12');
   await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});
   assert.equal(await page.evaluate(()=>intelligentUI.data),null);
   assert.equal(await page.evaluate(()=>smartUI.data),null);

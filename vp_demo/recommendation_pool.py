@@ -230,9 +230,30 @@ class SmartRecommendationPool:
             stale = row['input_hash'] != input_hash or summary.get('policyVersion')!=POLICY_VERSION
             editorials = {r[0]:json.loads(r[1]) for r in c.execute("SELECT problem_id,payload FROM training_public_materials WHERE kind='editorial'")}
             attempts = {r[0]:json.loads(r[1]) for r in c.execute('SELECT problem_id,payload FROM training_editorial_attempts')}
+            entries=[(r['status'],json.loads(r['payload'])) for r in c.execute(
+                "SELECT status,payload FROM smart_pool_entries WHERE user_id=? AND status IN ('candidate','reserve') ORDER BY position",(uid,))]
+            statements={r[0]:json.loads(r[1]) for r in c.execute(
+                "SELECT problem_id,payload FROM training_public_materials WHERE kind='statement'")}
+            archive_unavailable=False
+            try:archived=self.archive.load()['materials']
+            except ValueError:
+                archived={};archive_unavailable=True
+            def has_statement(entry):
+                key=entry['materialKey']
+                material=statements.get(key) or archived.get(key,{}).get('payload',{})
+                statement=material.get('statement') or {}
+                return any(str(statement.get(k) or '').strip() for k in
+                           ('body','input_format','output_format','interaction_format','note'))
+            statement_ids={e['id'] for _,e in entries if has_statement(e)}
+            card_count=c.execute('''SELECT count(*) FROM smart_card_memberships m
+                JOIN smart_pool_entries e ON e.user_id=m.user_id AND e.problem_id=m.problem_id
+                WHERE m.user_id=? AND e.status IN ('candidate','reserve')''',(uid,)).fetchone()[0]
+            overview={'availableCount':len(entries),'statementCount':len(statement_ids),'cardCount':card_count}
+            if archive_unavailable:overview['archiveUnavailable']=True
             items = []
-            for r in c.execute("SELECT payload FROM smart_pool_entries WHERE user_id=? AND status='candidate' ORDER BY position", (uid,)):
-                entry = json.loads(r[0])
+            for status,entry in entries:
+                if status!='candidate':continue
+                entry['materials']['statement']='ready' if entry['id'] in statement_ids else 'missing'
                 editorial = editorials.get(entry['materialKey'])
                 attempt = attempts.get(entry['materialKey'])
                 if editorial:
@@ -242,12 +263,13 @@ class SmartRecommendationPool:
                     entry['materials'].update(editorial='failed',editorialReason=attempt.get('message'),editorialCode=attempt.get('code'))
                 items.append({k:entry[k] for k in ('id','problem','sources','level','materials')})
             summary['editorialReady'] = sum(e['materials']['editorial']=='ready' for e in items)
+            summary['statementReady'] = sum(e['materials']['statement']=='ready' for e in items)
             summary['referenceCodeReady'] = sum(e['materials']['referenceCode']=='ready' for e in items)
             summary['referenceCodeLinksOnly'] = sum(e['materials']['referenceCode']=='links_only' for e in items)
             quality=coverage(len(items),sum(e['materials']['editorial']=='ready' and e['materials']['referenceCode']=='ready' for e in items),stale,summary.get('targetCount',len(items)))
             return summary | {'prepared':True, 'handle':data['handle'], 'version':row['version'],
                 'preparedAt':row['prepared_at'], 'needsRefresh':stale,
-                'candidates':items,'materialCoverage':quality,'retrievalReady':quality['ready'],
+                'candidates':items,'overview':overview,'materialCoverage':quality,'retrievalReady':quality['ready'],
                 'selectionReady':quality['ready']}
 
     def retrieval_candidates(self, uid):

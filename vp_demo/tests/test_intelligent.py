@@ -118,6 +118,7 @@ class PoolPreparationTests(unittest.TestCase):
     def test_capacity_repeat_cache_and_no_spoilers(self):
         a = self.pool.refresh(1)
         self.assertEqual((a['candidateCount'],a['reserveCount'],a['statementReady']),(100,30,100))
+        self.assertEqual(a['overview'],{'availableCount':130,'statementCount':130,'cardCount':0})
         self.assertNotIn('hidden-algorithm', json.dumps(a))
         self.assertNotIn('"tags"', json.dumps(a))
         self.assertTrue(a['selectionReady'])
@@ -137,6 +138,21 @@ class PoolPreparationTests(unittest.TestCase):
         self.assertEqual((b['candidateCount'],b['reserveCount']),(100,29))
         self.assertNotIn(first['id'],[p['id'] for p in b['candidates']])
         self.assertTrue(self.pool.material(1,first['id'])['material']['statement']['body'])
+
+    def test_overview_counts_reserves_and_only_this_users_in_range_cards(self):
+        self.pool.refresh(1);self.pool.refresh(2)
+        with self.connect() as c:
+            outside=c.execute("SELECT problem_id FROM smart_pool_entries WHERE user_id=1 AND status='reserve' LIMIT 1").fetchone()[0]
+            c.execute('INSERT INTO smart_card_memberships VALUES(?,?,?)',(1,outside,1000))
+            c.execute('INSERT INTO smart_card_memberships VALUES(?,?,?)',(2,'cf:1:A1',1000))
+        self.assertEqual(self.pool.state(1)['overview']['cardCount'],1)
+        before=self.material_rows()
+        self.record(index=outside.split(':')[-1],verdict='OK')
+        self.assertTrue(self.pool.state(1)['needsRefresh'])
+        refreshed=self.pool.refresh(1)
+        self.assertEqual(refreshed['overview'],{'availableCount':129,'statementCount':129,'cardCount':0})
+        self.assertEqual(self.pool.state(2)['overview']['cardCount'],1)
+        self.assertTrue(set(before)<=set(self.material_rows()))
 
     def test_rating_changes_recheck_pool_but_keep_materials(self):
         self.pool.refresh(1); before=self.material_rows()
@@ -234,7 +250,12 @@ class PoolPreparationTests(unittest.TestCase):
         before=self.pool.refresh(1)
         self.pack.write_bytes(b'broken')
         with self.assertRaises(ValueError):self.pool.refresh(1)
-        self.assertEqual(before,self.pool.state(1))
+        after=self.pool.state(1)
+        self.assertEqual({k:v for k,v in before.items() if k!='overview'},
+                         {k:v for k,v in after.items() if k!='overview'})
+        self.assertEqual(after['overview']['availableCount'],130)
+        self.assertEqual(after['overview']['statementCount'],100)
+        self.assertTrue(after['overview']['archiveUnavailable'])
 
     def test_content_change_refreshes_only_changed_public_material(self):
         self.pool.refresh(1);before=self.material_rows();self.now+=100
