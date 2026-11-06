@@ -225,7 +225,7 @@ class PoolPreparationTests(unittest.TestCase):
         with self.connect() as c:c.execute('INSERT OR REPLACE INTO training_profiles(user_id,preferences,reference,cf_rating) VALUES(?,?,?,?)',(1,json.dumps(DEFAULTS),1900,1800))
         result=self.pool.refresh(1)
         self.assertEqual(result['referenceRating'],1800)
-        self.assertEqual(result['range'],[1600,2000])
+        self.assertEqual(result['range'],[1000,2600])
 
     def test_daily_cooldown_and_day_changes_do_not_affect_smart_pool(self):
         self.preferences(includeAttempted=True)

@@ -68,7 +68,7 @@ class SmartRecommendationPool:
         prefs = dict(DEFAULTS)
         if profile:
             prefs.update(json.loads(profile[0]))
-        bounds = [max(0,reference-200),reference+200] if prefs['difficultyMode']=='default' else [prefs['minRating'],prefs['maxRating']]
+        bounds = [max(0,reference-800),reference+800] if prefs['difficultyMode']=='default' else [prefs['minRating'],prefs['maxRating']]
         data = {'handle':settings.get('handle') or '', 'reference':reference,
                 'ratingKnown':type(rating) is int and rating >= 0,
                 'records':records, 'preferences':prefs, 'range':bounds,
